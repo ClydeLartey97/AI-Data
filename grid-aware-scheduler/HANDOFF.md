@@ -178,6 +178,20 @@ That is exactly what makes the rest of the plan possible: a hosted web page coul
 
 Generated output lands in `app/build/` (gitignored — it rebuilds in seconds). The server caches for 5 minutes, since the underlying signals only move on a half-hour settlement boundary.
 
+**Charting — two tools, chosen per panel, not one for everything.**
+
+- **KLineCharts** (v9.8.12, Apache-2.0, vendored at `app/static/vendor/`) for dense zoomable time series — carbon, price, weather over days to months. Pan, zoom, crosshair and a click-to-read tooltip are the whole interaction there, and it handles that density far better than Plotly while not looking like Plotly. `app/kline.py` is ported from the National Grid Tool's `services/kline.py`, which had already absorbed the painful part.
+- **Hand-written SVG** for everything KLineCharts is not for: generation-mix breakdowns, stat tiles, sparklines, fleet and routing diagrams. It is a *financial candlestick* library — a fuel-mix chart is not an OHLC series and forcing it through would be worse than drawing it directly.
+
+**Jank already hit and fixed, so nobody hits it twice:**
+- The formatter API is `chart.setCustomApi({formatDate})`, **not** `setFormatter`. Calling the wrong name throws, and since it sits before `applyNewData` the chart draws styled axes and *no data at all* — it looks like a data problem and is actually an exception. Check the vendored bundle's exported names before guessing an API.
+- The default tooltip lists open/high/low/close. For a line series that is the same number four times. Replaced with a custom tooltip showing time and value only.
+- Axis label weight cannot be set for dates independently of times — the library styles the whole bottom axis as one group.
+- Library defaults print a bare `HH:mm` with no date, and an ambiguous `MM-DD`. Custom `Intl.DateTimeFormat` formatters spell the month and keep the year, and drop clock times once bars are daily or coarser.
+- Timezone: `chart.setTimezone()` rebuilds the internal formatter and repaints, so formatters read `dtf.resolvedOptions().timeZone` rather than tracking toggle state — one source of truth.
+
+**Not yet verified:** the click-to-read tooltip renders correctly. It could not be confirmed in a headless screenshot because KLineCharts handles pointer events on its own canvas overlay and ignores synthetic ones. Needs checking with a real mouse on the served page.
+
 **Charts:** the palette is Apple's system colours snapped to steps that pass a colour-accessibility validator in *both* light and dark — lightness band, chroma floor, colour-blind separation, normal-vision separation, and contrast against the surface. The dark series colours are deliberately **darker** than Apple's own dark system colours, which sit above the band a chart needs. Don't hand-edit `CARBON_*` / `PRICE_*` in `app/dashboard.py` without re-validating. Carbon and price get separate charts on purpose — never a dual y-axis.
 
 ## A note on the `demo/` simulator
