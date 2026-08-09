@@ -248,6 +248,12 @@ Provenance is on screen as a badge, not buried: SPEC for datasheet-backed rows, 
 
 **The number that matters is hourly matching, not annual.** Measured live at Thurso with 500 kW of each: the site generates **191% of what it needs** across the period yet covers only **90% of it**, still importing 930 kWh — because the generation arrived when the load did not. Netting annual totals would call that fully renewable. This is what 24/7 carbon-free accounting means and why the page reports both figures side by side with the gap called out.
 
+**Simulator rewritten to compute client-side (2026-08-09).** The first version precomputed every (model, task, device, count) combination server-side and embedded the lot. That capped the catalogue at whatever the payload could carry — five models — and made a custom model impossible, because you cannot precompute a number nobody has typed. Now the device and model specs ship and the arithmetic runs on each control change. The page went from 122 KB to **32 KB** while going from 840 fixed combinations to 35 models x 12 devices x 11 fleet sizes x 6 precisions, plus any custom model. Precomputing was the expensive way to do less.
+
+`core/models.py` holds the catalogue — Llama, Mistral, Qwen, Gemma, Phi, DeepSeek, Command R, Falcon, Yi, GPT-OSS. **MoE models carry two parameter counts and conflating them is the classic error:** compute scales with *active* parameters, memory with *total*. DeepSeek-V3 is 671B total and ~37B active — the compute of a 37B model and the memory of a 671B one. Both true; a simulator tracking one will confidently mislead.
+
+**Page 1 now shows regions.** All 18 GB grid regions with live carbon and generation mix. The adapters had existed for hours while the page still showed national-only data, which was the fair criticism. Measured live: North Scotland **0 gCO2/kWh on 100% wind** against South West England at **358 on 91% gas** — same country, same instant. Moving a job is a bigger lever than delaying one, and the page now says so.
+
 **Still to build: page 3, the planner.** Given a job, a heterogeneous fleet ("3 NVIDIA, 2 Intel Arc, 1 AMD" or 25 H100s) and a deadline, decide how to split the work across devices and when to run each part, optimising cost and carbon together. `hardware/base.Fleet` already models heterogeneous groups and `core/workload` already splits work by achievable throughput; what is missing is placing those splits in *time* against the grid signal.
 
 ## Auto hardware analysis, and how to prove it works (planned 2026-08-09)

@@ -92,8 +92,9 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache):
                 return
 
             def build_simulator() -> str:
-                return simulator.render(simulator.build_matrix(),
-                                        simulator._grid_context(),
+                return simulator.render(simulator.device_specs(),
+                                        simulator.model_specs(),
+                                        simulator.grid_context(),
                                         simulator.build_sites())
 
             def build() -> str:

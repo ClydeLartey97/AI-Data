@@ -25,6 +25,7 @@ from pathlib import Path
 
 from adapters.base_adapter import GridDataPoint
 from adapters.gb import GBAdapter
+from adapters.gb_regional import GBRegionalAdapter
 from app.chart import CHART_CSS, Band, ChartSeries, chart
 from core.grid import Job, cheapest_window, cleanest_window, compare, run_immediately
 
@@ -142,6 +143,72 @@ def _tile(label: str, value: str, sub: str, *, accent: str = "") -> str:
       <div class="tile-value"{cls}>{value}</div>
       <div class="tile-sub">{sub}</div>
     </div>"""
+
+
+def _regions_card() -> str:
+    """All 18 GB grid regions, right now.
+
+    This is the single largest lever in the project and it was missing from
+    this page for far too long: at the moment of writing, North Scotland sat
+    at 0 gCO2/kWh on 96% wind while East Midlands sat at 131. Same country,
+    same instant. Time-shifting a job saved ~54% carbon; moving it can save
+    nearly all of it.
+
+    Carbon only. GB settles ONE national wholesale price, so location changes
+    emissions and not the bill — see adapters/gb_regional. Locational price
+    variation is real but belongs to nodal markets (CAISO, ERCOT), and this
+    page must not imply otherwise.
+    """
+    try:
+        regions = GBRegionalAdapter().regions()
+    except Exception as exc:
+        return f'<section class="card"><h2>Regions</h2><p class="note">Regional data unavailable ({html.escape(str(exc)[:80])}).</p></section>'
+    if not regions:
+        return ""
+
+    live = [r for r in regions if r.carbon_forecast is not None]
+    if not live:
+        return ""
+    lo, hi = min(live, key=lambda r: r.carbon_forecast), max(live, key=lambda r: r.carbon_forecast)
+    spread = (hi.carbon_forecast / lo.carbon_forecast) if lo.carbon_forecast else None
+    worst = max(r.carbon_forecast for r in live) or 1
+
+    rows = []
+    for r in sorted(live, key=lambda r: r.carbon_forecast):
+        mix = ", ".join(f"{f} {p:.0f}%" for f, p in r.top_sources if p > 0.5) or "—"
+        width = max(2.0, r.carbon_forecast / worst * 100)
+        rows.append(
+            f"<tr><td>{html.escape(r.name)}</td>"
+            f'<td><b>{r.carbon_forecast:,.0f}</b></td>'
+            f'<td class="mixcell">{html.escape(mix)}</td>'
+            f'<td class="barcell"><span class="rbar" style="width:{width:.0f}%"></span></td></tr>')
+
+    return f"""
+<section class="card">
+  <h2>Where, not just when</h2>
+  <p class="note">
+    All 18 GB grid regions, live. <b>{html.escape(lo.name)} is at {lo.carbon_forecast:,.0f} gCO₂/kWh
+    while {html.escape(hi.name)} is at {hi.carbon_forecast:,.0f}</b>
+    {'— a ' + f'{spread:,.0f}' + '× spread across the same country at the same instant.' if spread and spread < 1000 else 'right now.'}
+    Moving a job is a bigger lever than delaying one.
+  </p>
+  <div class="tiles">
+    {_tile("Cleanest region", f"{lo.carbon_forecast:,.0f}", html.escape(lo.name) + " · gCO₂/kWh", accent="--carbon")}
+    {_tile("Dirtiest region", f"{hi.carbon_forecast:,.0f}", html.escape(hi.name) + " · gCO₂/kWh")}
+    {_tile("Renewable share", f"{lo.renewable_pct:,.0f}%", "wind, solar and hydro where it's cleanest")}
+    {_tile("Regions", f"{len(live)}", "each with its own generation mix")}
+  </div>
+  <div style="overflow-x:auto">
+  <table class="regions">
+    <thead><tr><th>Region</th><th>gCO₂/kWh</th><th>Leading sources</th><th></th></tr></thead>
+    <tbody>{''.join(rows)}</tbody>
+  </table></div>
+  <p class="note" style="margin:14px 0 0">
+    Carbon only. GB settles one national wholesale price, so moving a job north changes
+    its emissions and not its bill — locational <em>price</em> variation belongs to nodal
+    markets like CAISO and ERCOT, and is not claimed here.
+  </p>
+</section>"""
 
 
 def render(series: list[GridDataPoint], job: Job, market: str, currency: str) -> str:
@@ -318,6 +385,14 @@ th, td {{ text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--s
 th:first-child, td:first-child {{ text-align: left; }}
 th {{ color: var(--text-2); font-weight: 510; }}
 .foot {{ color: var(--text-2); font-size: 13px; margin-top: 26px; }}
+table.regions {{ margin-top: 16px; }}
+table.regions td, table.regions th {{ text-align: left; }}
+table.regions td:nth-child(2), table.regions th:nth-child(2) {{ text-align: right;
+  font-variant-numeric: tabular-nums; width: 90px; }}
+.mixcell {{ color: var(--text-2); font-size: 12px; }}
+.barcell {{ width: 30%; }}
+.rbar {{ display: block; height: 6px; border-radius: 3px; background: var(--carbon);
+  opacity: .55; }}
 .sr-only {{ position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }}
 .empty {{ color: var(--text-2); }}
 /* SVG elements ignore the HTML `hidden` attribute, which left the hover dot
@@ -353,6 +428,8 @@ svg [hidden] {{ display: none; }}
     {_tile("Cheapest ahead", f"£{min(live_p):,.2f}", f"per MWh · {(max(live_p)/min(live_p)):.1f}× spread")}
   </div>
 </section>
+
+{_regions_card()}
 
 <section class="card">
   <h2>Scheduling decision</h2>
