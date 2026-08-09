@@ -227,3 +227,114 @@ CATALOG.update({m.key: m for m in [
              "specific model.",
        confidence="UNPUBLISHED", open_weights=False),
 ]})
+
+
+# --------------------------------------------------------------------------
+# Architecture — what the KV cache actually depends on
+# --------------------------------------------------------------------------
+"""
+Parameter count alone cannot size an inference deployment.
+
+The KV cache holds one key and one value vector per token, per layer, for
+every sequence in flight. Its size is:
+
+    bytes = 2 x layers x kv_heads x head_dim x context x batch x bytes_per_elem
+
+None of that is derivable from the parameter count, and at long context it
+stops being a rounding error: a 70B model at bf16 is 141 GB of weights, but
+serving 32 concurrent sequences at 128k context needs *more KV cache than
+weights*. A simulator using a flat 1.25x multiplier — as this one did — will
+tell you a job fits on hardware that would immediately run out of memory.
+
+Grouped-query attention is the other half. Modern models share key/value
+heads across query heads (Llama 3 70B has 64 query heads but only 8 KV
+heads), which cuts the cache by 8x. Ignoring GQA overstates cache by nearly
+an order of magnitude on exactly the models people actually serve.
+"""
+
+
+@dataclass(frozen=True)
+class Architecture:
+    layers: int
+    hidden: int
+    heads: int
+    kv_heads: int          # < heads means grouped-query attention
+    estimated: bool = False
+
+    @property
+    def head_dim(self) -> int:
+        return self.hidden // self.heads if self.heads else 128
+
+    @property
+    def gqa_ratio(self) -> float:
+        return self.heads / self.kv_heads if self.kv_heads else 1.0
+
+    def kv_bytes_per_token(self, precision: str = "fp16") -> float:
+        """Both K and V, across every layer, for one token of one sequence."""
+        elem = BYTES_PER_PARAM.get(precision, 2)
+        return 2 * self.layers * self.kv_heads * self.head_dim * elem
+
+
+#: Published architectures for the models most likely to be served. Values are
+#: from the model cards / config.json.
+ARCHITECTURES: dict[str, Architecture] = {
+    "llama32-1b":   Architecture(16, 2048, 32, 8),
+    "llama32-3b":   Architecture(28, 3072, 24, 8),
+    "llama31-8b":   Architecture(32, 4096, 32, 8),
+    "llama31-70b":  Architecture(80, 8192, 64, 8),
+    "llama31-405b": Architecture(126, 16384, 128, 8),
+    "llama2-7b":    Architecture(32, 4096, 32, 32),   # pre-GQA: cache is 4x bigger
+    "llama2-13b":   Architecture(40, 5120, 40, 40),
+    "llama2-70b":   Architecture(80, 8192, 64, 8),
+    "mistral-7b":   Architecture(32, 4096, 32, 8),
+    "mixtral-8x7b": Architecture(32, 4096, 32, 8),
+    "mixtral-8x22b": Architecture(56, 6144, 48, 8),
+    "qwen25-7b":    Architecture(28, 3584, 28, 4),
+    "qwen25-14b":   Architecture(48, 5120, 40, 8),
+    "qwen25-32b":   Architecture(64, 5120, 40, 8),
+    "qwen25-72b":   Architecture(80, 8192, 64, 8),
+    "qwen3-8b":     Architecture(36, 4096, 32, 8),
+    "qwen3-32b":    Architecture(64, 5120, 64, 8),
+    "gemma2-9b":    Architecture(42, 3584, 16, 8),
+    "gemma2-27b":   Architecture(46, 4608, 32, 16),
+    "phi3-mini":    Architecture(32, 3072, 32, 32),
+    "phi4":         Architecture(40, 5120, 40, 10),
+    "deepseek-v3":  Architecture(61, 7168, 128, 128),
+    "deepseek-r1":  Architecture(61, 7168, 128, 128),
+    "command-r":    Architecture(40, 8192, 64, 64),
+    "falcon-40b":   Architecture(60, 8192, 128, 8),
+    "falcon-180b":  Architecture(80, 14848, 232, 8),
+    "yi-34b":       Architecture(60, 7168, 56, 8),
+    "grok-1":       Architecture(64, 6144, 48, 8),
+    "dbrx":         Architecture(40, 6144, 48, 8),
+}
+
+
+def estimate_architecture(params_b: float) -> Architecture:
+    """Infer a plausible shape when the real one is not catalogued.
+
+    Uses the aspect ratios transformers actually cluster around rather than a
+    formula, and assumes 8 KV heads because essentially every model of
+    consequence released since 2023 uses grouped-query attention. Flagged
+    ``estimated`` so the UI can say the KV figure is a guess about the model's
+    shape, not just about its size.
+    """
+    table = [
+        (1.5, 16, 2048, 16), (4, 28, 3072, 24), (9, 32, 4096, 32),
+        (16, 40, 5120, 40), (35, 48, 6144, 48), (80, 80, 8192, 64),
+        (200, 96, 12288, 96), (1e9, 126, 16384, 128),
+    ]
+    for ceiling, layers, hidden, heads in table:
+        if params_b <= ceiling:
+            return Architecture(layers, hidden, heads, min(8, heads), estimated=True)
+    return Architecture(126, 16384, 128, 8, estimated=True)
+
+
+def architecture_for(key: str, params_b: float) -> Architecture:
+    return ARCHITECTURES.get(key) or estimate_architecture(params_b)
+
+
+def kv_cache_gb(arch: Architecture, context: int, batch: int,
+                precision: str = "fp16") -> float:
+    """KV cache for ``batch`` sequences each holding ``context`` tokens."""
+    return arch.kv_bytes_per_token(precision) * context * batch / 1e9

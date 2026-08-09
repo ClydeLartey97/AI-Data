@@ -79,17 +79,29 @@ RANGES_BY_KEY = {r.key: r for r in RANGES}
 
 @dataclass
 class Bucket:
-    """One aggregated interval. Keeps the extremes, not just the middle."""
+    """One aggregated interval.
+
+    Carries a full OHLC set, not just a mean. Open and close are the first and
+    last readings in the interval, which makes a candle meaningful on grid
+    data: a long red body is a half-day where carbon climbed steadily, and a
+    long wick is a spike that did not hold. A mean alone shows neither.
+    """
 
     start: datetime
     mean: float
     low: float
     high: float
     count: int
+    open: float = 0.0
+    close: float = 0.0
 
     @property
     def spread(self) -> float:
         return self.high - self.low
+
+    @property
+    def rising(self) -> bool:
+        return self.close >= self.open
 
 
 def pick_range(key: str) -> Range:
@@ -138,7 +150,8 @@ def bucket_series(
 
     return [
         Bucket(start=start, mean=sum(vals) / len(vals),
-               low=min(vals), high=max(vals), count=len(vals))
+               low=min(vals), high=max(vals), count=len(vals),
+               open=vals[0], close=vals[-1])
         for start, vals in sorted(groups.items())
     ]
 

@@ -95,16 +95,27 @@ def test_simulator_javascript_parses():
 
 # --- structural checks that need no browser ------------------------------
 
-def test_chart_emits_data_for_every_range():
+def test_chart_ships_native_series_not_prebucketed():
+    """Bucketing moved to the client so interval and range are independent.
+
+    Server-side bucketing per range forced them to be the same thing, which is
+    why candles came out flat at the native range: the bucket was already one
+    reading, so open, high, low and close were identical.
+    """
     html = _chart_html()
-    assert '"points"' in html
+    assert '"t":' in html and '"v":' in html, "native points missing"
+    assert '"o":' not in html, "server should not pre-bucket into OHLC"
     for key in ("1D", "1W", "1M"):
         assert f'data-r="{key}"' in html
+    for iv in ("1800", "3600", "86400"):
+        assert f'data-iv="{iv}"' in html, f"interval {iv} control missing"
 
 
 def test_chart_ships_interaction_controls():
     html = _chart_html()
-    for token in ('data-act="reset"', 'data-act="csv"', "ch-sel", "pointerdown"):
+    for token in ('data-act="reset"', 'data-act="csv"', 'data-act="zone"',
+                  "ch-sel", "pointerdown", "wheel", "dblclick", "keydown",
+                  'data-type="candle"', 'data-ov="ma"', 'data-ov="spread"'):
         assert token in html, f"missing {token}"
 
 
@@ -118,3 +129,27 @@ def test_dashboard_renders_without_regional_data():
     from app.dashboard import render
     html = render(_fake_series(), Job("t", 6.5, 8, 48), "GB", "GBP")
     assert "<title>" in html and "Grid Signal" in html
+
+
+def test_no_unsubstituted_placeholders():
+    """A missed __TOKEN__ is a valid JS identifier.
+
+    node --check accepts it, so the failure only shows up in a browser as
+    "__HSUB__ is not defined" — which silently blanks the chart. This is
+    exactly how the second blank-chart regression shipped.
+    """
+    html = _chart_html()
+    assert not re.findall(r"__[A-Z_]+__", html), "placeholder left in output"
+
+
+def test_candles_are_not_flat_at_native_resolution():
+    """Interval must be independent of range.
+
+    When the two were conflated, selecting a short range made each bucket one
+    reading, so open == high == low == close and every candle rendered as a
+    flat dash. The fix is client-side bucketing, so the page must ship native
+    points plus interval controls rather than pre-bucketed OHLC.
+    """
+    html = _chart_html()
+    assert '"o":' not in html and '"h":' not in html
+    assert 'data-iv="21600"' in html
