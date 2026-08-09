@@ -1,0 +1,36 @@
+# --- Not part of this repository -------------------------------------------
+# Clyde's earlier GB power-market data project. Kept locally as a sibling
+# folder because grid-aware-scheduler imports two of its API clients at
+# runtime (see grid-aware-scheduler/HANDOFF.md, "External dependency"), but it
+# is separate work with its own lifecycle and is deliberately not tracked here.
+National-Grid-Tool/
+
+# editor configuration, not shared project config
+.vscode/
+.idea/
+
+# --- python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# env files (never commit real keys)
+.env
+.env.local
+
+# --- data ------------------------------------------------------------------
+# cached market data pulled from live APIs — re-fetchable, don't track
+**/data/cache/
+*.sqlite
+*.db
+*.parquet
+
+# notebook scratch state
+.ipynb_checkpoints/
+
+# --- os --------------------------------------------------------------------
+.DS_Store
