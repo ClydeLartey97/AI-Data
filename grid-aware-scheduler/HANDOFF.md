@@ -178,9 +178,19 @@ That is exactly what makes the rest of the plan possible: a hosted web page coul
 
 Generated output lands in `app/build/` (gitignored — it rebuilds in seconds). The server caches for 5 minutes, since the underlying signals only move on a half-hour settlement boundary.
 
-**Charting — two tools, chosen per panel, not one for everything.**
+**Charting — custom, not a library. Decided 2026-08-09 after trying KLineCharts.**
 
-- **KLineCharts** (v9.8.12, Apache-2.0, vendored at `app/static/vendor/`) for dense zoomable time series — carbon, price, weather over days to months. Pan, zoom, crosshair and a click-to-read tooltip are the whole interaction there, and it handles that density far better than Plotly while not looking like Plotly. `app/kline.py` is ported from the National Grid Tool's `services/kline.py`, which had already absorbed the painful part.
+The target is a good *consumer finance* chart (Trading212, Yahoo), which is not the same thing as a trading terminal — and the difference decided the build. A terminal gives free pan/zoom and technical indicators; an RSI of carbon intensity is meaningless. A consumer chart gives a **range selector** and a **crosshair that reads out in a fixed header slot**, and that is roughly two hundred lines of SVG.
+
+`app/chart.py` + `core/resample.py`. No library, no CDN, ~125 KB page, full design control.
+
+**The domain reason this could not be delegated to a charting library:** bucketing must keep the extremes. Naive downsampling takes each bucket's mean — and for a scheduler that is actively destructive, because the whole job is finding the *cheapest half-hour*. A day whose 30-minute prices ran £2.84 to £158.94 has a daily mean near £80, and both numbers that matter are gone. So every bucket keeps mean, min and max; the chart draws the mean as a line with the min-max range as a band behind it. Zooming out costs resolution and never costs the extremes. `tests/test_resample.py::test_extremes_survive_aggregation` guards this, because a mean-only chart still *looks* fine — the failure is invisible by inspection.
+
+**Bug worth remembering: axis format comes from the SPAN, not the BUCKET.** They are different questions. A 1-month range buckets into 2-hour bars, so the bucket is "intraday" — but labelling a month-wide axis `22:00, 20:00, 04:00` tells the reader nothing about where they are. Span decides the axis; bucket decides the hover readout. Caught only by rendering it and looking.
+
+Ranges: 1D (30 min) · 1W (30 min) · 1M (2 h) · 3M (6 h) · 1Y (1 day) · Max (1 week). All bucketed server-side and embedded, so switching range is a repaint, not a fetch.
+
+**KLineCharts is kept but unused** (`app/kline.py`, vendored v9.8.12, Apache-2.0) in case a power-user terminal view with indicators is ever wanted. Its lessons are recorded below.
 - **Hand-written SVG** for everything KLineCharts is not for: generation-mix breakdowns, stat tiles, sparklines, fleet and routing diagrams. It is a *financial candlestick* library — a fuel-mix chart is not an OHLC series and forcing it through would be worse than drawing it directly.
 
 **Jank already hit and fixed, so nobody hits it twice:**
