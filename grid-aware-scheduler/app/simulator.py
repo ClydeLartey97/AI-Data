@@ -192,6 +192,29 @@ tr.nofit td{{opacity:.42}}
 .assum{{margin:14px 0 0;padding-left:18px;color:var(--text-2);font-size:13px}}
 .assum li{{margin:3px 0}}
 .foot{{color:var(--text-2);font-size:13px;margin-top:26px}}
+.fleet{{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}}
+.fleet-chip{{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:9px;
+border:1px solid var(--sep);background:color-mix(in srgb,var(--text) 3%,transparent);
+font-size:13px;font-variant-numeric:tabular-nums}}
+.fleet-chip b{{font-weight:620}}
+.fleet-chip i{{font-style:normal;color:var(--text-2);font-size:11px}}
+.fleet-chip button{{border:0;background:transparent;color:var(--text-3);cursor:pointer;
+font:inherit;font-size:15px;line-height:1;padding:0 2px}}
+.fleet-chip button:hover{{color:var(--red)}}
+.fleet-add{{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}}
+.fleet-add select{{font:inherit;font-size:13px;padding:6px 10px;border-radius:9px;
+border:1px solid var(--sep);background:var(--card);color:var(--text)}}
+.fleet-sum{{margin-left:auto;font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums}}
+#pathmap{{width:100%;height:auto;display:block}}
+.pm-col{{fill:var(--text-3);font-size:9px;font-weight:700;letter-spacing:.12em}}
+.pm-rib{{opacity:.26}}
+.pm-node{{stroke:none}}
+.pm-job{{fill:var(--text);opacity:.8}}
+.pm-lab{{fill:var(--text);font-size:11.5px;font-weight:600;letter-spacing:-.01em}}
+.pm-sub{{fill:var(--text-2);font-size:10px;font-variant-numeric:tabular-nums}}
+.pm-joblab{{fill:var(--bg);font-size:11.5px;font-weight:700}}
+.pm-jobsub{{fill:var(--bg);font-size:10px;opacity:.75;font-variant-numeric:tabular-nums}}
+.pm-warn{{fill:var(--red);font-size:12px;font-weight:800}}
 @media(max-width:720px){{h1{{font-size:32px}}}}
 </style>
 </head>
@@ -213,10 +236,10 @@ tr.nofit td{{opacity:.42}}
       <input id="cparams" type="number" min="0.01" step="0.1" value="7"></div>
     <div class="ctl custom-only hide"><label for="cactive">Active (B) — 0 if dense</label>
       <input id="cactive" type="number" min="0" step="0.1" value="0"></div>
-    <div class="ctl"><label for="prec">Precision</label><select id="prec">{prec_opts}</select></div>
+    <div class="ctl"><label for="prec">Weight precision</label><select id="prec">{prec_opts}</select></div>
     <div class="ctl"><label for="device">Hardware</label><select id="device">{device_opts}</select></div>
-    <div class="ctl"><label for="count">How many</label><select id="count">{count_opts}</select></div>
-    <div class="ctl"><label for="tokens">Tokens</label><select id="tokens">
+    <div class="ctl"><label for="count">Accelerators</label><select id="count">{count_opts}</select></div>
+    <div class="ctl"><label for="tokens">Token budget</label><select id="tokens">
       <option value="10000000">10M</option><option value="100000000">100M</option>
       <option value="1000000000">1B</option><option value="10000000000">10B</option>
       <option value="100000000000">100B</option><option value="15000000000000">15T (full pretrain)</option>
@@ -231,12 +254,30 @@ tr.nofit td{{opacity:.42}}
 </section>
 
 <section class="card">
+  <h2>Allocation path</h2>
+  <p class="note">Work splits across groups in proportion to what each can actually deliver, so every group finishes together. Split evenly instead and the slowest sets the finish time while the fastest idle at part load.</p>
+  <div class="fleet" id="fleet"></div>
+  <div class="fleet-add">
+    <select id="addDev"></select>
+    <select id="addN">
+      <option value="1">1</option><option value="2">2</option><option value="4" selected>4</option>
+      <option value="8">8</option><option value="16">16</option><option value="32">32</option>
+      <option value="64">64</option><option value="128">128</option>
+    </select>
+    <button type="button" class="ch-btn" id="addBtn">Add group</button>
+    <span class="fleet-sum" id="fleetSum"></span>
+  </div>
+  <svg id="pathmap" viewBox="0 0 1000 300" role="img"
+       aria-label="Allocation of work across device groups and time windows"></svg>
+</section>
+
+<section class="card">
   <h2>On-site renewables</h2>
   <p class="note"><span class="prov ESTIMATED">ESTIMATED</span></p>
   <div class="controls">
     <div class="ctl"><label for="site">Location</label><select id="site">{site_opts}</select></div>
-    <div class="ctl"><label for="solar">Solar capacity</label><select id="solar">{cap_opts}</select></div>
-    <div class="ctl"><label for="wind">Wind capacity</label><select id="wind">{cap_opts}</select></div>
+    <div class="ctl"><label for="solar">Solar installed</label><select id="solar">{cap_opts}</select></div>
+    <div class="ctl"><label for="wind">Wind installed</label><select id="wind">{cap_opts}</select></div>
   </div>
   <div class="tiles" id="rtiles"></div>
   <div id="rgap"></div>
@@ -256,7 +297,7 @@ tr.nofit td{{opacity:.42}}
   <h2>Does adding hardware help?</h2>
   
   <div style="overflow-x:auto"><table id="scale"><thead><tr>
-    <th>Fleet</th><th>Runtime</th><th>Energy</th><th>Scaling</th><th>Memory</th>
+    <th>Fleet size</th><th>Runtime</th><th>Energy</th><th>Scaling</th><th>Memory</th>
   </tr></thead><tbody></tbody></table></div>
 </section>
 
@@ -372,6 +413,8 @@ function render(){{
   }}).join("");
 
   renewables(r.kw);
+  if (typeof drawPath === 'function') drawPath();
+  if (typeof drawFleet === 'function') drawPath();
   document.getElementById("foot").textContent =
     m.name+" \\u00b7 "+nf(m.params,1)+"B parameters at "+S.prec+" \\u00b7 needs ~"+
     nf(memNeed(m),0)+" GB.";
@@ -428,6 +471,101 @@ document.querySelectorAll("#task button").forEach(function(b){{
     document.querySelectorAll("#task button").forEach(function(o){{o.classList.remove("on");}});
     b.classList.add("on"); S.task=b.dataset.t; render(); }});
 }});
+
+var FLEET = [];
+function fleetCap(dk){{ var d=D[dk], m=modelOf();
+  return S.task==="training" ? d.tflops*d.mfu : (d.bw*1e9)/wbytes(m)/1e12; }}
+function allocate(){{
+  var m=modelOf();
+  var gs = FLEET.length ? FLEET : [{{dev:S.device,n:S.count}}];
+  var caps = gs.map(function(g){{ return fleetCap(g.dev)*g.n; }});
+  var tot = caps.reduce(function(a,b){{return a+b;}},0)||1;
+  var mem = gs.reduce(function(a,g){{ return a+D[g.dev].mem*g.n; }},0);
+  var hours = S.task==="training"
+    ? (6*m.active*1e9*S.tokens)/(tot*1e12)/3600
+    : (S.tokens/(tot*1e12))/3600;
+  var legs = gs.map(function(g,i){{ var d=D[g.dev];
+    var kw=(S.task==="training"? d.tdp : d.idle+(d.tdp-d.idle)*0.6)*g.n/1000;
+    return {{dev:g.dev,name:d.name,n:g.n,share:caps[i]/tot,kw:kw}}; }});
+  var kw = legs.reduce(function(a,l){{return a+l.kw;}},0);
+  return {{legs:legs,hours:hours,kw:kw,kwh:kw*hours,mem:mem,need:memNeed(m),
+          fits: mem>=memNeed(m)}};
+}}
+function drawPath(){{
+  var a=allocate(), svg=document.getElementById("pathmap"); if(!svg) return;
+  var W=1000,H=300,xJ=6,wJ=120,xD=320,wD=220,xW=690,wW=304,pad=20,gap=7,n=a.legs.length;
+  var usable=H-pad*2-gap*(n-1);
+  var hs=a.legs.map(function(l){{ return Math.max(26,l.share*usable); }});
+  var sum=hs.reduce(function(x,y){{return x+y;}},0);
+  if(sum>usable) hs=hs.map(function(h){{return h*usable/sum;}});
+  var jobH=hs.reduce(function(x,y){{return x+y;}},0)+gap*(n-1);
+  var win = GRID.ok ? "cheapest "+Math.max(1,Math.round(a.hours))+"h window" : "immediate";
+  var out='<text class="pm-col" x="'+xJ+'" y="11">JOB</text>'+
+          '<text class="pm-col" x="'+xD+'" y="11">DEVICES</text>'+
+          '<text class="pm-col" x="'+xW+'" y="11">WINDOW</text>';
+  var ribs="",nodes="",labs="",y=pad,sy=pad;
+  a.legs.forEach(function(l,i){{
+    var h=hs[i], fill=i%3===0?"var(--blue)":(i%3===1?"var(--green)":"var(--orange)");
+    var m1=(xJ+wJ+xD)/2, m2=(xD+wD+xW)/2;
+    ribs+='<path opacity=".26" fill="'+fill+'" d="M'+(xJ+wJ)+','+sy.toFixed(1)+
+      ' C'+m1+','+sy.toFixed(1)+' '+m1+','+y.toFixed(1)+' '+xD+','+y.toFixed(1)+
+      ' L'+xD+','+(y+h).toFixed(1)+' C'+m1+','+(y+h).toFixed(1)+' '+m1+','+(sy+h).toFixed(1)+
+      ' '+(xJ+wJ)+','+(sy+h).toFixed(1)+' Z"/>';
+    ribs+='<path opacity=".26" fill="'+fill+'" d="M'+(xD+wD)+','+y.toFixed(1)+
+      ' C'+m2+','+y.toFixed(1)+' '+m2+','+y.toFixed(1)+' '+xW+','+y.toFixed(1)+
+      ' L'+xW+','+(y+h).toFixed(1)+' C'+m2+','+(y+h).toFixed(1)+' '+m2+','+(y+h).toFixed(1)+
+      ' '+(xD+wD)+','+(y+h).toFixed(1)+' Z"/>';
+    nodes+='<rect fill="'+fill+'" opacity=".72" x="'+xD+'" y="'+y.toFixed(1)+
+      '" width="'+wD+'" height="'+h.toFixed(1)+'" rx="4"/>'+
+      '<rect fill="'+fill+'" opacity=".4" x="'+xW+'" y="'+y.toFixed(1)+
+      '" width="'+wW+'" height="'+h.toFixed(1)+'" rx="4"/>';
+    var cy=y+h/2, room=h>=32;
+    labs+='<text class="pm-lab" x="'+(xD+10)+'" y="'+(cy-(room?4:-4)).toFixed(1)+'">'+
+      nf(l.n,0)+"\u00d7 "+l.name+"</text>";
+    if(room) labs+='<text class="pm-sub" x="'+(xD+10)+'" y="'+(cy+10).toFixed(1)+'">'+
+      nf(l.share*100,1)+"% of work \u00b7 "+nf(l.kw,1)+" kW</text>";
+    labs+='<text class="pm-lab" x="'+(xW+10)+'" y="'+(cy-(room?4:-4)).toFixed(1)+'">'+win+"</text>";
+    if(room){{ var b=[dur(l.hours!==undefined?l.hours:a.hours)];
+      if(GRID.ok){{ b.push("\u00a3"+nf(GRID.price_cheap,0)+"/MWh");
+                   b.push(nf(GRID.carbon_clean,0)+" gCO\u2082"); }}
+      labs+='<text class="pm-sub" x="'+(xW+10)+'" y="'+(cy+10).toFixed(1)+'">'+
+        b.join(" \u00b7 ")+"</text>"; }}
+    y+=h+gap; sy+=h+gap;
+  }});
+  out+=ribs+'<rect class="pm-job" x="'+xJ+'" y="'+pad+'" width="'+wJ+'" height="'+
+    jobH.toFixed(1)+'" rx="4"/><text class="pm-joblab" x="'+(xJ+10)+'" y="'+
+    (pad+jobH/2-4).toFixed(1)+'">'+modelOf().name+"</text>"+
+    '<text class="pm-jobsub" x="'+(xJ+10)+'" y="'+(pad+jobH/2+10).toFixed(1)+'">'+S.task+"</text>"+
+    nodes+labs;
+  if(!a.fits) out+='<text class="pm-warn" x="'+(xD+wD-6)+'" y="'+(pad+12)+
+    '" text-anchor="end">memory short</text>';
+  svg.innerHTML=out;
+  var fs=document.getElementById("fleetSum");
+  if(fs) fs.textContent = a.legs.reduce(function(s,l){{return s+l.n;}},0)+
+    " accelerators \u00b7 "+nf(a.mem,0)+" GB \u00b7 "+nf(a.kw,1)+" kW \u00b7 "+
+    dur(a.hours)+" \u00b7 "+nf(a.kwh,0)+" kWh";
+}}
+function drawFleet(){{
+  var el=document.getElementById("fleet"); if(!el) return;
+  if(!FLEET.length){{
+    el.innerHTML='<span class="fleet-chip"><i>single device above \u2014 add groups for a mixed fleet</i></span>';
+  }} else {{
+    el.innerHTML=FLEET.map(function(g,i){{
+      return '<span class="fleet-chip"><b>'+g.n+'\u00d7</b> '+D[g.dev].name+' <i>'+
+        D[g.dev].vendor+'</i><button type="button" data-rm="'+i+'">\u00d7</button></span>'; }}).join("");
+    el.querySelectorAll("[data-rm]").forEach(function(b){{
+      b.addEventListener("click",function(){{ FLEET.splice(+b.dataset.rm,1); drawFleet(); }}); }});
+  }}
+  drawPath();
+}}
+(function(){{
+  var sel=document.getElementById("addDev"); if(!sel) return;
+  sel.innerHTML=Object.keys(D).map(function(k){{
+    return '<option value="'+k+'">'+D[k].vendor+" "+D[k].name+"</option>"; }}).join("");
+  document.getElementById("addBtn").addEventListener("click",function(){{
+    FLEET.push({{dev:sel.value,n:+document.getElementById("addN").value}}); drawFleet(); }});
+  drawFleet();
+}})();
 render();
 </script>
 </body>

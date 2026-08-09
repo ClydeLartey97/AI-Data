@@ -30,8 +30,8 @@ import webbrowser
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from adapters.gb import GBAdapter
 from app.dashboard import render
+from core import feed
 from app import simulator
 from core.grid import Job
 
@@ -98,12 +98,11 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache):
                                         simulator.build_sites())
 
             def build() -> str:
-                end = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
-                adapter = GBAdapter()
-                series = adapter.get_data(end - timedelta(days=days), end)
+                end = datetime.now(timezone.utc)
+                series = feed.load(end - timedelta(days=days), end)
                 if not series:
-                    raise RuntimeError("adapter returned no settlement periods")
-                return render(series, job, adapter.market_name, adapter.currency)
+                    raise RuntimeError("no market data available")
+                return render(series, job, "GB", "GBP")
 
             try:
                 target = sim_cache if path == "/simulator" else cache
@@ -130,7 +129,7 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache):
 def main() -> None:
     ap = argparse.ArgumentParser(description="Serve the grid dashboard locally.")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--days", type=int, default=21)
+    ap.add_argument("--days", type=int, default=400)
     ap.add_argument("--power", type=float, default=6.5, help="job power draw in kW")
     ap.add_argument("--hours", type=float, default=4.0, help="job duration in hours")
     ap.add_argument("--deadline", type=float, default=24.0, help="deadline in hours")

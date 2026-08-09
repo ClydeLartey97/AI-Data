@@ -24,8 +24,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from adapters.base_adapter import GridDataPoint
-from adapters.gb import GBAdapter
 from adapters.gb_regional import GBRegionalAdapter
+from core import feed
 from app.chart import CHART_CSS, Band, ChartSeries, chart
 from core.grid import Job, cheapest_window, cleanest_window, compare, run_immediately
 
@@ -546,7 +546,7 @@ PRICE_PROVIDER_NOTE = "APXMIDP only — providers are not averaged, because N2EX
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Render the grid signal dashboard.")
-    ap.add_argument("--days", type=int, default=21, help="days of data to pull (default 21)")
+    ap.add_argument("--days", type=int, default=400, help="days of history (default 400)")
     ap.add_argument("--end", type=str, default=None, help="end date YYYY-MM-DD (default: latest available)")
     ap.add_argument("--power", type=float, default=6.5, help="job power draw in kW")
     ap.add_argument("--hours", type=float, default=4.0, help="job duration in hours")
@@ -558,9 +558,8 @@ def main() -> None:
            else datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1))
     start = end - timedelta(days=args.days)
 
-    adapter = GBAdapter()
-    print(f"Fetching {adapter.market_name} {start.date()} → {end.date()} …")
-    series = adapter.get_data(start, end)
+    print(f"Loading GB {start.date()} → {end.date()} …")
+    series = feed.load(start, end)
     if not series:
         raise SystemExit("No data returned — check network access to the market APIs.")
 
@@ -572,7 +571,7 @@ def main() -> None:
     )
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(render(series, job, adapter.market_name, adapter.currency), encoding="utf-8")
+    OUT.write_text(render(series, job, "GB", "GBP"), encoding="utf-8")
     print(f"{len(series)} settlement periods → {OUT}")
 
     if args.open:

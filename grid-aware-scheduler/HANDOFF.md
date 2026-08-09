@@ -256,6 +256,58 @@ Provenance is on screen as a badge, not buried: SPEC for datasheet-backed rows, 
 
 **Still to build: page 3, the planner.** Given a job, a heterogeneous fleet ("3 NVIDIA, 2 Intel Arc, 1 AMD" or 25 H100s) and a deadline, decide how to split the work across devices and when to run each part, optimising cost and carbon together. `hardware/base.Fleet` already models heterogeneous groups and `core/workload` already splits work by achievable throughput; what is missing is placing those splits in *time* against the grid signal.
 
+## Local cache — the thing that made date ranges honest (built 2026-08-09)
+
+`core/store.py` (SQLite) + `core/backfill.py` + `core/feed.py`.
+
+**The bug it fixed was a lie in the UI.** Live fetching costs ~0.3s per day of history, so the app fetched three weeks — then offered 1M, 3M, 1Y and Max range buttons that all rendered *the same three weeks*. Four controls, one view, no indication anything was wrong.
+
+Now: **395 days cached, 18,864 rows, 3.2 MB, and a full year loads in 23 ms.** Backfill takes ~2 minutes once and is safe to re-run or interrupt (idempotent per settlement date). Only settled days are cached — today and tomorrow are forecasts that change, so those always go live.
+
+```bash
+python -m core.backfill --days 400     # one-time, ~2 min
+python -m core.backfill --stats
+```
+
+**Everything above the data layer now calls `core.feed.load()`** and never touches an adapter directly. `feed.extent()` reports what data actually exists, so the range selector can stop offering ranges it cannot fill.
+
+**A year of data changes the story.** Over 2025-07 → 2026-08: price ran **£0.09 to £560.81 — a 6,231× spread** — and carbon 17 to 319 gCO2/kWh. The three-week window had been hiding almost all of the opportunity this project exists to exploit.
+
+## Allocation path map (built 2026-08-09)
+
+`app/flow.py` (server-side renderer) and a client-side version inside `app/simulator.py`, plus a fleet builder for mixed-vendor estates.
+
+Three stages — **JOB → DEVICES → WINDOW** — drawn as ribbons whose width is each group's share of the work, because the proportions *are* the decision. Verified with 8x H100 + 4x Arc A770 + 2x MI300X + 1x M2 Ultra: the H100s take 79.1% and the MI300X 19.9%, so every group finishes together. Split that fleet evenly instead and the slowest sets the finish time while the fastest idle at part load, burning power for nothing — which is precisely what a uniform-fleet demo cannot show.
+
+## Chart: now a terminal, not a picture
+
+Area / line / **candles** / bars, wheel zoom centred on cursor, drag-pan, shift-drag box select, keyboard control, MA/EMA, UTC↔Local, CSV, full OHLC crosshair. **Interval and range are separate controls** — conflating them is why candles rendered as flat dashes (each bucket held one reading, so O=H=L=C). Bucketing is client-side and zoom is stored as a *time window*, so changing interval keeps you on the same stretch of time.
+
+Two deliberate departures from a financial terminal: a **spread sub-pane** instead of volume (the high-low range within an interval is the size of the prize for shifting a job; volume is meaningless here), and **percentile bands** instead of oscillators ("is now in the cheapest decile" is the real question; an RSI of carbon intensity is not).
+
+## Three ways I have now blanked the charts — read before editing generated JS
+
+Each was invisible to the check I had at the time:
+
+1. **A raw newline inside a JS string literal.** Syntax error, kills the whole script block. Grepping found the code present and correct-looking. **Fix: `tests/test_pages.py` parses every generated script with `node --check`.**
+2. **An unsubstituted `__HSUB__` placeholder.** A valid JS identifier, so `node --check` passed it; it only failed in a browser. **Fix: substitution raises at build time, and a test asserts no `__TOKEN__` survives.**
+3. **A `str.replace()` whose anchor did not match**, so an entire JS block was silently dropped — the markup rendered, the behaviour did not. **Fix: assert the anchor exists before replacing.**
+
+**And the rule underneath all three: render it and look at it.** Every one of these passed its automated check. Screenshot the page after any change to generated JS.
+
+Note both page modules build HTML with **f-strings**, so braces in injected JS must be doubled (`{{`/`}}`). `app/chart.py` avoids this entirely by using a plain string with `__TOKEN__` placeholders — the better pattern, and worth porting `simulator.py` to.
+
+## Still outstanding (2026-08-09)
+
+- **KV cache is modelled in `core/models.py` but not wired into the simulator UI.** Inference memory there is still a flat 1.25x multiplier, which is wrong by orders of magnitude at long context: a 70B at 128k across 32 sequences needs ~1.3 TB of KV cache against 141 GB of weights, and grouped-query attention swings it 8x. **Needs context-length and batch-size controls.**
+- **PUE / cooling overhead is absent.** Datacentre energy is not chip energy; every figure is optimistic by roughly 1.2-1.5x.
+- **No sharding model** (FSDP/ZeRO), so multi-GPU training memory is wrong.
+- **Scaling model covers communication only** — no pipeline bubbles or stragglers, so ~99% at 32 devices where reality is 70-85%.
+- **No URL state**, so a configuration cannot be shared or returned to.
+- **57 devices sit in a plain `<select>`** with no search or filter.
+- **Density**: the pages still read as an iOS app rather than a data terminal — large type, generous padding, one column. Needs a denser multi-panel layout.
+- **Page 3, the planner**, still does not exist.
+
 ## Auto hardware analysis, and how to prove it works (planned 2026-08-09)
 
 **The goal: nobody types in specs.** A simulation runs on the device, and from how it behaves the system derives what that hardware actually is — throughput, memory bandwidth, power curve, and how it scales. Manual spec entry is a stopgap.

@@ -239,7 +239,12 @@ _JS = r"""
 
   var fmt = new Intl.NumberFormat("en-GB", {
     minimumFractionDigits: CFG.precision, maximumFractionDigits: CFG.precision });
-  function num(v) { return CFG.prefix + fmt.format(v); }
+  function num(v) {
+    // -0.00 is not a price. Rounding can land a tick just below zero and the
+    // formatter faithfully prints the sign.
+    if (Object.is(v, -0) || (v < 0 && v > -Math.pow(10, -CFG.precision) / 2)) v = 0;
+    return CFG.prefix + fmt.format(v);
+  }
 
   function when(ms, fine) {
     var o = fine
