@@ -139,6 +139,32 @@ def scatter_panel(corr: dict) -> str:
       <text class="p-xt" x="{w-4}" y="{h-4}" text-anchor="end">price →</text></svg>"""
 
 
+EXPAND_JS = """
+// Click a panel to expand it. The SVGs are viewBox-based, so scaling is free —
+// the panel simply becomes a fixed overlay and the same markup fills the
+// screen. Escape or a second click closes it.
+(function () {
+  var open = null;
+  function close() {
+    if (!open) return;
+    open.classList.remove("pnl-open");
+    document.body.classList.remove("pnl-lock");
+    open = null;
+  }
+  document.addEventListener("click", function (e) {
+    var pnl = e.target.closest ? e.target.closest(".pnl") : null;
+    if (!pnl) { if (open && !e.target.closest(".pnl-open")) close(); return; }
+    if (pnl === open) { close(); return; }
+    close();
+    open = pnl;
+    pnl.classList.add("pnl-open");
+    document.body.classList.add("pnl-lock");
+  });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
+})();
+"""
+
+
 PANEL_CSS = """
 .panel { width: 100%; height: auto; display: block; }
 .p-gl { stroke: var(--sep); stroke-width: 1; vector-effect: non-scaling-stroke; }
@@ -152,4 +178,22 @@ PANEL_CSS = """
 .p-pt { fill: var(--series, var(--blue)); opacity: .34; }
 .p-mark { stroke: var(--text-3); stroke-width: 1; stroke-dasharray: 3 3;
   vector-effect: non-scaling-stroke; }
+
+/* expand-on-click */
+.pnl { cursor: zoom-in; transition: box-shadow .15s ease, transform .15s ease; }
+.pnl:hover { box-shadow: 0 0 0 1px var(--sep), 0 6px 20px rgba(0,0,0,.10); }
+.pnl::after { content: "⤢"; position: absolute; top: 10px; right: 12px; font-size: 11px;
+  color: var(--text-3); opacity: 0; transition: opacity .15s ease; }
+.pnl { position: relative; }
+.pnl:hover::after { opacity: 1; }
+.pnl-open { position: fixed; inset: 3vh 3vw; z-index: 500; cursor: zoom-out;
+  overflow: auto; box-shadow: 0 24px 80px rgba(0,0,0,.45); border-radius: 16px;
+  padding: 26px 30px; display: flex; flex-direction: column; }
+.pnl-open .panel { flex: 1; min-height: 0; height: auto; }
+.pnl-open h3 { font-size: 15px; margin-bottom: 16px; }
+.pnl-open .pnl-note { font-size: 14px; max-width: 70ch; }
+.pnl-open::after { content: "esc"; opacity: .7; font-size: 10px; letter-spacing: .1em; }
+body.pnl-lock { overflow: hidden; }
+body.pnl-lock::before { content: ""; position: fixed; inset: 0; z-index: 400;
+  background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
 """

@@ -313,7 +313,35 @@ Panels: savings-vs-deadline (cost and carbon), time-of-day profile (both), durat
 
 The Apple design language was **dropped as the primary goal**. It is optimised for calm and touch; this is a data terminal for an operator, and the two pull in opposite directions — large type and generous padding mean fewer things on screen, which is the opposite of powerful. Density is now the goal. The analytics grid is the first piece built that way; the rest of both pages still needs converting from the vertical card stack.
 
-## Still outstanding (2026-08-09)
+## Panels expand on click (2026-08-09)
+
+Click any analytics panel to fill the screen; Escape or a second click closes it. The SVGs are viewBox-based so scaling is free — the panel becomes a fixed overlay and the same markup fills the viewport. `EXPAND_JS` in `app/panels.py`.
+
+**The two main charts do not expand yet** — they have their own toolbar and zoom, so the interaction needs designing rather than copying.
+
+## Still outstanding — ordered by what a buyer would notice first (2026-08-09)
+
+**Credibility (changes whether the numbers can be trusted):**
+1. **KV cache is modelled but not wired into the simulator UI.** `core/models.py` has architectures, GQA and `kv_cache_gb()`; the page still uses a flat 1.25x multiplier for inference memory. Wrong by orders of magnitude at long context — a 70B at 128k across 32 sequences needs ~1.3 TB of KV cache against 141 GB of weights. **Needs context-length and batch-size controls.**
+2. **No PUE / cooling overhead.** Datacentre energy is not chip energy. Every kWh, GBP and kgCO2 figure on the simulator is optimistic by roughly 1.2-1.5x. A single multiplier with a control would fix it, and for the target buyer this is a *headline* number, not a detail.
+3. **No sharding model** (FSDP/ZeRO). Multi-GPU training memory is therefore wrong — it assumes weights replicate.
+4. **Scaling model covers communication only.** No pipeline bubbles, stragglers or failure recovery, so it reports ~99% at 32 devices where reality is 70-85%. Documented in the code, still optimistic.
+
+**Depth (changes whether it feels like a product):**
+5. **Density.** The analytics grid is dense; everything else is still a vertical stack of large cards. Convert both pages to a multi-panel layout. The Apple design language was dropped as the primary goal for this reason.
+6. **No URL state** — a configuration cannot be shared, bookmarked or returned to. For a tool an operator would show a colleague, this is close to essential.
+7. **57 devices in a plain `<select>`** with no search, grouping or filter.
+8. **Main charts do not expand**; panels now do.
+9. **No cross-filtering** — selecting a region or a window does not filter anything else.
+10. **Simulator has no analytics panels** — sensitivity to price, carbon, utilisation and fleet size all belong there.
+
+**Missing pieces of the stated vision:**
+11. **Page 3, the planner** — job + heterogeneous fleet + deadline, deciding the split *and* the timing together. The path map draws the split; nothing yet chooses the timing per group.
+12. **US markets.** CAISO OASIS was proven reachable keyless (24h of SP15 day-ahead LMP, $28.86-$68.88). Nodal pricing means location changes *price* there, not just carbon — the strongest demonstration of the whole idea, and still unbuilt.
+13. **Auto hardware profiling** with the validation method already designed above.
+14. **Custom model auto-analysis** — the user enters a model and the tool profiles it.
+
+
 
 - **KV cache is modelled in `core/models.py` but not wired into the simulator UI.** Inference memory there is still a flat 1.25x multiplier, which is wrong by orders of magnitude at long context: a 70B at 128k across 32 sequences needs ~1.3 TB of KV cache against 141 GB of weights, and grouped-query attention swings it 8x. **Needs context-length and batch-size controls.**
 - **PUE / cooling overhead is absent.** Datacentre energy is not chip energy; every figure is optimistic by roughly 1.2-1.5x.

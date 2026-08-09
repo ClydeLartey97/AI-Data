@@ -26,7 +26,7 @@ from pathlib import Path
 from adapters.base_adapter import GridDataPoint
 from adapters.gb_regional import GBRegionalAdapter
 from core import analytics, feed
-from app.panels import (PANEL_CSS, duration_panel, profile_panel,
+from app.panels import (EXPAND_JS, PANEL_CSS, duration_panel, profile_panel,
                         savings_panel, scatter_panel)
 from app.chart import CHART_CSS, Band, ChartSeries, chart
 from core.grid import Job, cheapest_window, cleanest_window, compare, run_immediately
@@ -595,6 +595,8 @@ svg [hidden] {{ display: none; }}
 
 </div>
 <script>
+{EXPAND_JS}
+
 // Crosshair + tooltip. An HTML chart is interactive by default; a static
 // picture of a time series makes the reader guess at values.
 for (const fig of document.querySelectorAll('.chart')) {{
