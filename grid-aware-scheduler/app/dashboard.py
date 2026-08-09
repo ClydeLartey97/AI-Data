@@ -25,6 +25,7 @@ from pathlib import Path
 
 from adapters.base_adapter import GridDataPoint
 from adapters.gb import GBAdapter
+from app.chart import CHART_CSS, Band, ChartSeries, chart
 from core.grid import Job, cheapest_window, cleanest_window, compare, run_immediately
 
 OUT = Path(__file__).resolve().parent / "build" / "grid_dashboard.html"
@@ -149,13 +150,21 @@ def render(series: list[GridDataPoint], job: Job, market: str, currency: str) ->
     live_c = [v for v in carbon if v is not None]
     live_p = [v for v in price if v is not None]
 
-    cost_cmp = compare(series, job, objective="cost")
-    clean = cleanest_window(series, job)
+    # The decision must be made over the window a job would actually face —
+    # the most recent deadline's worth of data — not over the whole history
+    # the charts happen to show. Running it across three weeks produced a
+    # "run immediately" baseline dated three weeks ago, which is not a
+    # decision anyone could act on, and put the chosen window off the edge of
+    # every visible chart range.
+    horizon = series[-job.deadline_periods:] if len(series) > job.deadline_periods else series
+    cost_cmp = compare(horizon, job, objective="cost")
+    clean = cleanest_window(horizon, job)
     baseline = cost_cmp.baseline
     scheduled = cost_cmp.scheduled
 
-    cheap_band = (scheduled.start_index, scheduled.start_index + job.duration_periods)
-    clean_band = (clean.start_index, clean.start_index + job.duration_periods)
+    run = timedelta(minutes=30) * job.duration_periods
+    scheduled_end = scheduled.start_time + run
+    clean_end = clean.start_time + run
 
     now = series[0].timestamp
     generated = datetime.now(timezone.utc)
@@ -309,6 +318,7 @@ th {{ color: var(--text-2); font-weight: 510; }}
 /* SVG elements ignore the HTML `hidden` attribute, which left the hover dot
    parked at 0,0 as a stray mark on every chart. */
 svg [hidden] {{ display: none; }}
+{CHART_CSS}
 @media (max-width: 720px) {{
   .decision {{ grid-template-columns: 1fr; }}
   .arrow {{ display: none; }}
@@ -343,7 +353,8 @@ svg [hidden] {{ display: none; }}
   <p class="note">
     {html.escape(job.name)} — {job.power_kw:g} kW for {job.duration_periods * 0.5:g} h
     ({job.energy_kwh:,.1f} kWh), deadline {job.deadline_periods * 0.5:g} h.
-    Optimising for cost.
+    Optimising for cost, decided over the {job.deadline_periods * 0.5:g} h from
+    {html.escape(horizon[0].timestamp.strftime('%a %d %b %H:%M'))}.
   </p>
   <div class="decision">
     <div class="slot">
@@ -384,16 +395,22 @@ svg [hidden] {{ display: none; }}
 
 <section class="card">
   <h2>Carbon intensity</h2>
-  <p class="note">Forecast gCO₂/kWh. Shaded band is the carbon-optimal window for this job.</p>
-  <div class="legend" style="--series: var(--carbon);"><span class="swatch"></span> gCO₂/kWh</div>
-  {_svg_chart(series, carbon, unit="gCO₂/kWh", label="Carbon intensity", var="--carbon", highlight=clean_band)}
+  <p class="note">Forecast gCO₂/kWh. Shaded span is the carbon-optimal window for this job. Pick a range; hover to read any point.</p>
+  {chart(ChartSeries("carbon", "Carbon intensity", "gCO₂/kWh",
+                     [(p.timestamp, p.carbon_intensity) for p in series],
+                     "--carbon", 0,
+                     bands=[Band(clean.start_time, clean_end, "carbon-optimal")]),
+         height=300, default_range="1W")}
 </section>
 
 <section class="card">
   <h2>Price</h2>
-  <p class="note">Day-ahead Market Index, £/MWh. Shaded band is the cost-optimal window for this job.</p>
-  <div class="legend" style="--series: var(--price);"><span class="swatch"></span> £/MWh</div>
-  {_svg_chart(series, price, unit="£/MWh", label="Price", var="--price", highlight=cheap_band)}
+  <p class="note">Day-ahead Market Index, £/MWh. Shaded span is the cost-optimal window. Pick a range; hover to read any point.</p>
+  {chart(ChartSeries("price", "Day-ahead price", "£/MWh",
+                     [(p.timestamp, p.price) for p in series],
+                     "--price", 2, prefix="£",
+                     bands=[Band(scheduled.start_time, scheduled_end, "cost-optimal")]),
+         height=300, default_range="1W")}
 </section>
 
 <section class="card">
@@ -454,7 +471,7 @@ PRICE_PROVIDER_NOTE = "APXMIDP only — providers are not averaged, because N2EX
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Render the grid signal dashboard.")
-    ap.add_argument("--days", type=int, default=3, help="days of data to pull (default 3)")
+    ap.add_argument("--days", type=int, default=21, help="days of data to pull (default 21)")
     ap.add_argument("--end", type=str, default=None, help="end date YYYY-MM-DD (default: latest available)")
     ap.add_argument("--power", type=float, default=6.5, help="job power draw in kW")
     ap.add_argument("--hours", type=float, default=4.0, help="job duration in hours")

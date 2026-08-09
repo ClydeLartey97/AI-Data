@@ -121,7 +121,7 @@ def make_handler(days: int, job: Job, cache: _Cache):
 def main() -> None:
     ap = argparse.ArgumentParser(description="Serve the grid dashboard locally.")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--days", type=int, default=3)
+    ap.add_argument("--days", type=int, default=21)
     ap.add_argument("--power", type=float, default=6.5, help="job power draw in kW")
     ap.add_argument("--hours", type=float, default=4.0, help="job duration in hours")
     ap.add_argument("--deadline", type=float, default=24.0, help="deadline in hours")

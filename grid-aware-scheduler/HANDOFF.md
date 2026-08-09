@@ -186,6 +186,16 @@ The target is a good *consumer finance* chart (Trading212, Yahoo), which is not 
 
 **The domain reason this could not be delegated to a charting library:** bucketing must keep the extremes. Naive downsampling takes each bucket's mean — and for a scheduler that is actively destructive, because the whole job is finding the *cheapest half-hour*. A day whose 30-minute prices ran £2.84 to £158.94 has a daily mean near £80, and both numbers that matter are gone. So every bucket keeps mean, min and max; the chart draws the mean as a line with the min-max range as a band behind it. Zooming out costs resolution and never costs the extremes. `tests/test_resample.py::test_extremes_survive_aggregation` guards this, because a mean-only chart still *looks* fine — the failure is invisible by inspection.
 
+**Bug worth remembering: the scheduling decision must run over the horizon a job actually faces, not over whatever history the charts show.** Feeding the full 21-day series to `compare()` produced a "run immediately" baseline dated three weeks earlier — not a decision anyone could act on — and placed the chosen window off the edge of every visible chart range. The dashboard now decides over `series[-deadline_periods:]` and states the window it decided over. Charts still show full history; the decision does not.
+
+**Chart completeness — what a grid chart actually needs.** A first version shipped with no y-axis at all: gridlines and value labels were missing entirely, so the reader could see that carbon rose but not to what. Also missing was any link back to the decision. Both now fixed:
+- Y-axis with round-number ticks (snapped via a nice-number step, because "190" is a number a reader holds and "187.4" is not), in a left gutter so labels never sit on the plot.
+- Highlighted spans mapped from timestamps, so the window the scheduler chose is visible on the curve and stays correct across range changes.
+- Range summary: high, low, average and **spread**, the last being the headline for a scheduler — it is the size of the prize for shifting a job at all.
+- A settled/forecast divider, because one unbroken line implies both halves are the same kind of claim and they are not.
+
+**Still missing from Page 1, and it is not finished:** generation mix by fuel, region selection and the 18-region comparison, weather alongside carbon, forward forecast, percentage change over the range, and weekend/overnight shading.
+
 **Bug worth remembering: axis format comes from the SPAN, not the BUCKET.** They are different questions. A 1-month range buckets into 2-hour bars, so the bucket is "intraday" — but labelling a month-wide axis `22:00, 20:00, 04:00` tells the reader nothing about where they are. Span decides the axis; bucket decides the hover readout. Caught only by rendering it and looking.
 
 Ranges: 1D (30 min) · 1W (30 min) · 1M (2 h) · 3M (6 h) · 1Y (1 day) · Max (1 week). All bucketed server-side and embedded, so switching range is a repaint, not a fetch.

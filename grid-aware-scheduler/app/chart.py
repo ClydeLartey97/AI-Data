@@ -28,9 +28,24 @@ from __future__ import annotations
 
 import html
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 
 from core.resample import RANGES, Bucket, Range, prepare
+
+
+@dataclass
+class Band:
+    """A highlighted span on the time axis — e.g. the window a job was placed in.
+
+    Without this the decision card and the chart stop talking to each other:
+    the card says "10:30" and the chart gives the reader no way to see where
+    that is on the curve.
+    """
+
+    start: datetime
+    end: datetime
+    label: str = ""
 
 
 @dataclass
@@ -42,6 +57,11 @@ class ChartSeries:
     color_var: str = "--price"
     precision: int = 0
     prefix: str = ""          # e.g. "£"
+    bands: list = field(default_factory=list)
+    #: Boundary between settled history and forecast. Drawn as a divider,
+    #: because "this already happened" and "this is a prediction" are not the
+    #: same claim and a single unbroken line implies they are.
+    now: datetime | None = None
 
 
 def _pack(buckets: list[Bucket], rng: Range) -> dict:
@@ -89,18 +109,23 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
       <span class="ch-val" data-val>—</span>
       <span class="ch-when" data-when></span>
     </div>
+    <div class="ch-stats" data-stats></div>
     <div class="ch-ranges">{pills}</div>
   </figcaption>
   <div class="ch-plot">
     <svg viewBox="0 0 1000 {height}" preserveAspectRatio="none" role="img"
          aria-label="{html.escape(series.label)} over time in {html.escape(series.unit)}">
+      <g class="ch-grid"></g>
+      <g class="ch-spans"></g>
       <path class="ch-band" d=""/>
       <path class="ch-line" d=""/>
+      <g class="ch-now" hidden><line class="ch-nowline"/></g>
       <g class="ch-cross" hidden>
         <line class="ch-vline" y1="6" y2="{height - 26}"/>
         <circle class="ch-dot2" r="4.5"/>
       </g>
       <g class="ch-axis"></g>
+      <g class="ch-yaxis"></g>
     </svg>
   </div>
 </figure>
@@ -110,7 +135,11 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
   var CFG = {{
     id: {json.dumps(cid)}, height: {height},
     precision: {series.precision}, prefix: {json.dumps(series.prefix)},
-    unit: {json.dumps(series.unit)}, start: {json.dumps(default_range)}
+    unit: {json.dumps(series.unit)}, start: {json.dumps(default_range)},
+    bands: {json.dumps([{"a": int(b.start.timestamp() * 1000),
+                         "b": int(b.end.timestamp() * 1000),
+                         "label": b.label} for b in series.bands])},
+    now: {json.dumps(int(series.now.timestamp() * 1000) if series.now else None)}
   }};
 
   var root = document.getElementById(CFG.id);
@@ -118,6 +147,9 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
   var band = root.querySelector(".ch-band"), line = root.querySelector(".ch-line");
   var cross = root.querySelector(".ch-cross"), vline = root.querySelector(".ch-vline");
   var dot = root.querySelector(".ch-dot2"), axis = root.querySelector(".ch-axis");
+  var grid = root.querySelector(".ch-grid"), yaxis = root.querySelector(".ch-yaxis");
+  var spans = root.querySelector(".ch-spans"), nowG = root.querySelector(".ch-now");
+  var nowLine = root.querySelector(".ch-nowline"), statsEl = root.querySelector("[data-stats]");
   var valEl = root.querySelector("[data-val]"), whenEl = root.querySelector("[data-when]");
   var W = 1000, H = CFG.height, PAD_B = 26, PAD_T = 6;
   var state = null;
@@ -131,6 +163,11 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
       ? {{ weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }}
       : {{ weekday: "short", day: "numeric", month: "short", year: "numeric" }};
     return new Intl.DateTimeFormat("en-GB", Object.assign(o, {{ timeZone: "UTC" }})).format(d);
+  }}
+
+  function stat(name, value) {{
+    return '<span class="ch-stat"><i>' + name + "</i><b>" +
+           CFG.prefix + fmtNum.format(value) + "</b></span>";
   }}
 
   function show(value, ms, intraday) {{
@@ -150,7 +187,8 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
     lo -= span * 0.10; hi += span * 0.10;
 
     var n = pts.length;
-    function X(i) {{ return n < 2 ? W / 2 : (i / (n - 1)) * W; }}
+    var PAD_L = 44;
+    function X(i) {{ return n < 2 ? (PAD_L + W) / 2 : PAD_L + (i / (n - 1)) * (W - PAD_L); }}
     function Y(v) {{ return PAD_T + (H - PAD_T - PAD_B) * (1 - (v - lo) / (hi - lo)); }}
 
     // Mean line.
@@ -171,6 +209,69 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
     }} else {{
       band.setAttribute("d", ""); band.style.display = "none";
     }}
+
+    // Y axis. A shape with no magnitude is not a chart — you can see that
+    // carbon rose without being able to say to what. Ticks are snapped to
+    // round numbers rather than the raw data bounds, because "190" is a
+    // number a reader holds and "187.4" is not.
+    function niceStep(range, want) {{
+      var raw = range / Math.max(want, 1);
+      var mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      var norm = raw / mag;
+      var step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10;
+      return step * mag;
+    }}
+    var step = niceStep(hi - lo, 4);
+    var gridHtml = "", yHtml = "";
+    for (var g = Math.ceil(lo / step) * step; g <= hi; g += step) {{
+      var gy = Y(g);
+      if (gy < PAD_T || gy > H - PAD_B) continue;
+      gridHtml += '<line class="ch-gl" x1="' + PAD_L + '" y1="' + gy.toFixed(1) +
+                  '" x2="' + W + '" y2="' + gy.toFixed(1) + '"/>';
+      yHtml += '<text class="ch-ytick" x="4" y="' + (gy - 4).toFixed(1) + '">' +
+               CFG.prefix + fmtNum.format(g) + "</text>";
+    }}
+    grid.innerHTML = gridHtml;
+    yaxis.innerHTML = yHtml;
+
+    // Highlighted spans (e.g. the window the scheduler chose), mapped from
+    // timestamps so they stay correct as the range changes.
+    var t0 = pts[0].t, t1 = pts[n - 1].t, tspan = (t1 - t0) || 1;
+    function XT(ms) {{ return PAD_L + Math.max(0, Math.min(1, (ms - t0) / tspan)) * (W - PAD_L); }}
+    var spanHtml = "";
+    (CFG.bands || []).forEach(function (b) {{
+      if (b.b < t0 || b.a > t1) return;   // outside this range entirely
+      var x1 = XT(b.a), x2 = XT(b.b);
+      spanHtml += '<rect class="ch-span" x="' + x1.toFixed(1) + '" y="' + PAD_T +
+                  '" width="' + Math.max(x2 - x1, 2).toFixed(1) +
+                  '" height="' + (H - PAD_T - PAD_B) + '" rx="4"/>';
+    }});
+    spans.innerHTML = spanHtml;
+
+    // The settled/forecast divider. One unbroken line implies both halves are
+    // the same kind of claim, and they are not.
+    if (CFG.now && CFG.now > t0 && CFG.now < t1) {{
+      var nx = XT(CFG.now);
+      nowLine.setAttribute("x1", nx); nowLine.setAttribute("x2", nx);
+      nowLine.setAttribute("y1", PAD_T); nowLine.setAttribute("y2", H - PAD_B);
+      nowG.hidden = false;
+    }} else {{ nowG.hidden = true; }}
+
+    // Range summary. The reader should not have to hunt the curve for its
+    // extremes, and for a scheduler the spread is the headline: it is the
+    // size of the prize for shifting a job at all.
+    var loV = Infinity, hiV = -Infinity, sum = 0, cnt = 0;
+    pts.forEach(function (p) {{
+      if (p.lo < loV) loV = p.lo;
+      if (p.hi > hiV) hiV = p.hi;
+      sum += p.m * p.n; cnt += p.n;
+    }});
+    var avg = cnt ? sum / cnt : 0;
+    var ratio = loV > 0 ? (hiV / loV) : null;
+    statsEl.innerHTML =
+      stat("High", hiV) + stat("Low", loV) + stat("Average", avg) +
+      '<span class="ch-stat"><i>Spread</i><b>' +
+        (ratio ? ratio.toFixed(1) + "\u00d7" : "\u2014") + "</b></span>";
 
     // Time axis: a handful of evenly spaced labels, never crowded.
     var want = Math.min(6, n), marks = "";
@@ -277,4 +378,21 @@ CHART_CSS = """
 .ch-dot2 { fill: var(--series); stroke: var(--card); stroke-width: 2; }
 .ch-tick { fill: var(--text-2); font-size: 11px; font-family: inherit; }
 svg [hidden] { display: none; }
+"""
+
+
+# Appended styles for the axis, spans, divider and stats row.
+CHART_CSS += """
+.ch-gl { stroke: var(--sep); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ch-ytick { fill: var(--text-2); font-size: 11px; font-family: inherit;
+  font-variant-numeric: tabular-nums; }
+.ch-span { fill: var(--series); opacity: .13; }
+.ch-nowline { stroke: var(--text-2); stroke-width: 1; stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke; }
+.ch-stats { display: flex; gap: 18px; align-items: flex-start; margin-left: 4px; }
+.ch-stat { display: flex; flex-direction: column; gap: 1px; }
+.ch-stat i { font-style: normal; font-size: 11px; color: var(--text-2); }
+.ch-stat b { font-size: 14px; font-weight: 590; letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) { .ch-stats { display: none; } }
 """
