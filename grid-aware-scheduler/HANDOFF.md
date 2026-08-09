@@ -297,6 +297,22 @@ Each was invisible to the check I had at the time:
 
 Note both page modules build HTML with **f-strings**, so braces in injected JS must be doubled (`{{`/`}}`). `app/chart.py` avoids this entirely by using a plain string with `__TOKEN__` placeholders — the better pattern, and worth porting `simulator.py` to.
 
+## Analytics panels — built for the actual buyer (2026-08-09)
+
+Target user is now explicit: **a data-centre operator with a carbon-neutrality target.** `core/analytics.py` + `app/panels.py` answer the questions that buyer has, measured over the whole cached year rather than one week.
+
+**Findings that should shape the pitch, all measured on 392 days of real GB data:**
+
+- **Flexibility is quantified.** A 4-hour job saves **21.9% median on cost at a 24-hour deadline**, and **75% at a week**. Carbon saves **28.5% at 24 hours**. Every start in the history, not one anecdote.
+- **Cheap is not clean.** Price/carbon correlation is only **r = 0.54**, and the cheapest decile is also the cleanest decile just **59% of the time**. An operator optimising purely on price misses the carbon target 41% of the time — which is the single strongest argument that the objective has to be *stated*, not inferred.
+- **Carbon is less volatile than price**, so carbon savings from time-shifting are smaller and steadier. Location, not timing, is the bigger carbon lever (North Scotland 0 vs South Wales 358 gCO2/kWh, same instant).
+
+Panels: savings-vs-deadline (cost and carbon), time-of-day profile (both), duration curve (both), price-carbon scatter. Deliberately non-interactive — a duration curve is a conclusion over a year, and giving every panel a toolbar would bury the two charts where interaction matters.
+
+## Design direction changed (2026-08-09)
+
+The Apple design language was **dropped as the primary goal**. It is optimised for calm and touch; this is a data terminal for an operator, and the two pull in opposite directions — large type and generous padding mean fewer things on screen, which is the opposite of powerful. Density is now the goal. The analytics grid is the first piece built that way; the rest of both pages still needs converting from the vertical card stack.
+
 ## Still outstanding (2026-08-09)
 
 - **KV cache is modelled in `core/models.py` but not wired into the simulator UI.** Inference memory there is still a flat 1.25x multiplier, which is wrong by orders of magnitude at long context: a 70B at 128k across 32 sequences needs ~1.3 TB of KV cache against 141 GB of weights, and grouped-query attention swings it 8x. **Needs context-length and batch-size controls.**

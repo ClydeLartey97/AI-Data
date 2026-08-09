@@ -25,7 +25,9 @@ from pathlib import Path
 
 from adapters.base_adapter import GridDataPoint
 from adapters.gb_regional import GBRegionalAdapter
-from core import feed
+from core import analytics, feed
+from app.panels import (PANEL_CSS, duration_panel, profile_panel,
+                        savings_panel, scatter_panel)
 from app.chart import CHART_CSS, Band, ChartSeries, chart
 from core.grid import Job, cheapest_window, cleanest_window, compare, run_immediately
 
@@ -202,6 +204,75 @@ def _regions_card() -> str:
     <tbody>{''.join(rows)}</tbody>
   </table></div>
   <p class="note" style="margin:14px 0 0">Carbon only — GB settles one national price.</p>
+</section>"""
+
+
+def _analytics_grid(series: list[GridDataPoint]) -> str:
+    """The panels a data-centre operator with a carbon target actually needs.
+
+    Each answers a decision, measured over the whole cached history rather
+    than one week: what flexibility is worth, when to run, how much of the
+    year is expensive, and whether cheap also means clean.
+    """
+    price_prof = analytics.hour_profile(series, "price")
+    carbon_prof = analytics.hour_profile(series, "carbon_intensity")
+    sav_cost = analytics.savings_vs_deadline(series, "price", 4.0)
+    sav_carb = analytics.savings_vs_deadline(series, "carbon_intensity", 4.0)
+    dur_p = analytics.duration_curve(series, "price")
+    dur_c = analytics.duration_curve(series, "carbon_intensity")
+    corr = analytics.correlation(series)
+
+    def head(i):
+        return sav_cost.median[i] if i < len(sav_cost.median) else 0.0
+    day = sav_cost.deadlines.index(24) if 24 in sav_cost.deadlines else 0
+    week = sav_cost.deadlines.index(168) if 168 in sav_cost.deadlines else -1
+    carb_day = (sav_carb.median[sav_carb.deadlines.index(24)]
+                if 24 in sav_carb.deadlines else 0.0)
+
+    return f"""
+<section class="grid4">
+  <div class="pnl">
+    <h3>What a deadline is worth <em>cost</em></h3>
+    {savings_panel(sav_cost, unit="% cost saved")}
+    <p class="pnl-note">A 4&nbsp;h job at a <b>24&nbsp;h</b> deadline saves
+      <b>{head(day):.1f}%</b> median{f", at a week <b>{sav_cost.median[week]:.0f}%</b>" if week >= 0 else ""}.
+      Every start in {len(series)//48:,} days, not one example.</p>
+  </div>
+  <div class="pnl">
+    <h3>What a deadline is worth <em>carbon</em></h3>
+    {savings_panel(sav_carb, unit="% carbon saved")}
+    <p class="pnl-note">Same job, carbon objective: <b>{carb_day:.1f}%</b> median at 24&nbsp;h.
+      Lower than the cost figure — carbon is less volatile than price.</p>
+  </div>
+  <div class="pnl">
+    <h3>Time of day <em>price</em></h3>
+    {profile_panel(price_prof, color="--price")}
+    <p class="pnl-note">Mean with p10–p90 band, by hour, whole history.</p>
+  </div>
+  <div class="pnl">
+    <h3>Time of day <em>carbon</em></h3>
+    {profile_panel(carbon_prof, color="--carbon")}
+    <p class="pnl-note">The daily cycle a deadline longer than a day can exploit.</p>
+  </div>
+  <div class="pnl">
+    <h3>Duration curve <em>price</em></h3>
+    {duration_panel(dur_p, color="--price")}
+    <p class="pnl-note">Sorted worst to best. The steep left tail is where the money is.</p>
+  </div>
+  <div class="pnl">
+    <h3>Duration curve <em>carbon</em></h3>
+    {duration_panel(dur_c, color="--carbon")}
+    <p class="pnl-note">A flat middle means shifting within it buys little.</p>
+  </div>
+  <div class="pnl span2">
+    <h3>Cheap is not clean <em>price vs carbon</em></h3>
+    {scatter_panel(corr)}
+    <p class="pnl-note">Correlation <b>r&nbsp;=&nbsp;{corr.get('r', 0):.2f}</b>.
+      The cheapest decile is also the cleanest decile only
+      <b>{corr.get('cheap_and_clean_pct', 0):.0f}%</b> of the time — so an operator
+      optimising purely on price misses the carbon target the rest of it. This is why
+      the objective has to be stated, not inferred.</p>
+  </div>
 </section>"""
 
 
@@ -393,6 +464,19 @@ table.regions td:nth-child(2), table.regions th:nth-child(2) {{ text-align: righ
    parked at 0,0 as a stray mark on every chart. */
 svg [hidden] {{ display: none; }}
 {CHART_CSS}
+{PANEL_CSS}
+.grid4 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px; margin-bottom: 18px; }}
+.pnl {{ background: var(--card); border-radius: 12px; padding: 14px 16px 12px;
+  box-shadow: var(--shadow); }}
+.pnl.span2 {{ grid-column: span 2; }}
+.pnl h3 {{ margin: 0 0 10px; font-size: 12px; font-weight: 660; letter-spacing: .01em;
+  text-transform: uppercase; color: var(--text-2); }}
+.pnl h3 em {{ font-style: normal; color: var(--text-3); text-transform: none;
+  font-weight: 560; letter-spacing: 0; }}
+.pnl-note {{ margin: 8px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--text-2); }}
+.pnl-note b {{ color: var(--text); font-weight: 640; font-variant-numeric: tabular-nums; }}
+@media (max-width: 760px) {{ .pnl.span2 {{ grid-column: span 1; }} }}
 @media (max-width: 720px) {{
   .decision {{ grid-template-columns: 1fr; }}
   .arrow {{ display: none; }}
@@ -421,6 +505,8 @@ svg [hidden] {{ display: none; }}
     {_tile("Cheapest ahead", f"£{min(live_p):,.2f}", f"per MWh · {(max(live_p)/min(live_p)):.1f}× spread")}
   </div>
 </section>
+
+{_analytics_grid(series)}
 
 {_regions_card()}
 
