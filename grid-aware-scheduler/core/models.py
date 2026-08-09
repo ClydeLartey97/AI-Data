@@ -34,6 +34,13 @@ BYTES_PER_PARAM = {"fp32": 4, "fp16": 2, "bf16": 2, "fp8": 1, "int8": 1, "int4":
 PRECISIONS = ["bf16", "fp16", "fp8", "int8", "int4", "fp32"]
 
 
+#: How much the parameter count can be trusted. Frontier labs stopped
+#: publishing sizes around GPT-4, so anything current is either reported by
+#: third parties or simply unknown — and a simulator that quietly treats a
+#: rumour as a datasheet is worthless. PUBLISHED means the authors stated it.
+CONFIDENCE = ("PUBLISHED", "REPORTED", "UNPUBLISHED")
+
+
 @dataclass(frozen=True)
 class Model:
     key: str
@@ -43,6 +50,8 @@ class Model:
     active_params_b: float | None = None  # MoE only; drives COMPUTE
     precision: str = "bf16"
     notes: str = ""
+    confidence: str = "PUBLISHED"
+    open_weights: bool = True
 
     @property
     def compute_params_b(self) -> float:
@@ -60,9 +69,11 @@ class Model:
         return self.weight_bytes(precision) / 1e9
 
 
-def _m(key, name, family, params, active=None, notes=""):
+def _m(key, name, family, params, active=None, notes="",
+       confidence="PUBLISHED", open_weights=True):
     return Model(key=key, name=name, family=family, params_b=params,
-                 active_params_b=active, notes=notes)
+                 active_params_b=active, notes=notes,
+                 confidence=confidence, open_weights=open_weights)
 
 
 CATALOG: dict[str, Model] = {m.key: m for m in [
@@ -153,3 +164,66 @@ def custom(params_b: float, *, active_params_b: float | None = None,
     return Model(key="custom", name=name, family="Custom",
                  params_b=params_b, active_params_b=active_params_b,
                  precision=precision, notes="User-specified")
+
+# --- appended: wider catalogue ------------------------------------------
+CATALOG.update({m.key: m for m in [
+    # Llama earlier + Llama 4
+    _m("llama2-7b", "Llama 2 7B", "Llama", 6.7),
+    _m("llama2-13b", "Llama 2 13B", "Llama", 13.0),
+    _m("llama2-70b", "Llama 2 70B", "Llama", 69.0),
+    _m("llama4-scout", "Llama 4 Scout", "Llama", 109.0, 17.0, "MoE, 16 experts"),
+    _m("llama4-maverick", "Llama 4 Maverick", "Llama", 400.0, 17.0, "MoE, 128 experts"),
+
+    # Qwen 3
+    _m("qwen3-0.6b", "Qwen3 0.6B", "Qwen", 0.6),
+    _m("qwen3-4b", "Qwen3 4B", "Qwen", 4.0),
+    _m("qwen3-8b", "Qwen3 8B", "Qwen", 8.2),
+    _m("qwen3-14b", "Qwen3 14B", "Qwen", 14.8),
+    _m("qwen3-32b", "Qwen3 32B", "Qwen", 32.8),
+    _m("qwen3-30b-a3b", "Qwen3 30B-A3B", "Qwen", 30.5, 3.3, "MoE"),
+    _m("qwen3-235b-a22b", "Qwen3 235B-A22B", "Qwen", 235.0, 22.0, "MoE"),
+
+    # DeepSeek
+    _m("deepseek-v2", "DeepSeek-V2 236B", "DeepSeek", 236.0, 21.0, "MoE"),
+    _m("deepseek-coder-33b", "DeepSeek Coder 33B", "DeepSeek", 33.0),
+
+    # Gemma 3
+    _m("gemma3-1b", "Gemma 3 1B", "Gemma", 1.0),
+    _m("gemma3-4b", "Gemma 3 4B", "Gemma", 4.3),
+    _m("gemma3-12b", "Gemma 3 12B", "Gemma", 12.2),
+    _m("gemma3-27b", "Gemma 3 27B", "Gemma", 27.4),
+
+    # Phi 4
+    _m("phi4", "Phi-4 14B", "Phi", 14.7),
+    _m("phi4-mini", "Phi-4 mini 3.8B", "Phi", 3.8),
+
+    # Code models
+    _m("codellama-34b", "Code Llama 34B", "Code", 33.7),
+    _m("codellama-70b", "Code Llama 70B", "Code", 69.0),
+    _m("starcoder2-15b", "StarCoder2 15B", "Code", 15.5),
+
+    # Other open weights
+    _m("grok-1", "Grok-1 314B", "Grok", 314.0, 86.0, "MoE, open weights"),
+    _m("olmo2-13b", "OLMo 2 13B", "OLMo", 13.7, notes="Fully open training data"),
+    _m("nemotron-340b", "Nemotron-4 340B", "Nemotron", 340.0),
+    _m("dbrx", "DBRX 132B", "DBRX", 132.0, 36.0, "MoE"),
+
+    # --- Frontier models -------------------------------------------------
+    # Parameter counts here are NOT datasheet facts. GPT-3 was published in
+    # the paper; GPT-4's shape is widely reported but never confirmed; the
+    # current frontier models from OpenAI, Anthropic and Google publish
+    # nothing at all. Rather than invent numbers, the unpublished ones are
+    # listed with a placeholder size and marked UNPUBLISHED so the UI can say
+    # so plainly. Use them to explore shape, never to quote a figure.
+    _m("gpt3-175b", "GPT-3 175B", "Frontier", 175.0,
+       notes="Published in the GPT-3 paper", open_weights=False),
+    _m("gpt4-reported", "GPT-4 (reported ~1.8T MoE)", "Frontier", 1760.0, 280.0,
+       notes="Widely reported as a ~1.8T MoE with ~280B active. Never confirmed "
+             "by OpenAI — treat as a shape, not a fact.",
+       confidence="REPORTED", open_weights=False),
+    _m("frontier-unpublished", "Frontier model (size unpublished)", "Frontier", 500.0, 60.0,
+       notes="OpenAI, Anthropic and Google no longer publish parameter counts. "
+             "This is a placeholder for exploring scale, not an estimate of any "
+             "specific model.",
+       confidence="UNPUBLISHED", open_weights=False),
+]})

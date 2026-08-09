@@ -111,6 +111,10 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
     </div>
     <div class="ch-stats" data-stats></div>
     <div class="ch-ranges">{pills}</div>
+    <div class="ch-tools">
+      <button type="button" data-act="reset" title="Reset zoom">Reset</button>
+      <button type="button" data-act="csv" title="Download visible data as CSV">CSV</button>
+    </div>
   </figcaption>
   <div class="ch-plot">
     <svg viewBox="0 0 1000 {height}" preserveAspectRatio="none" role="img"
@@ -120,6 +124,7 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
       <path class="ch-band" d=""/>
       <path class="ch-line" d=""/>
       <g class="ch-now" hidden><line class="ch-nowline"/></g>
+      <rect class="ch-sel" hidden x="0" y="0" width="0" height="0"/>
       <g class="ch-cross" hidden>
         <line class="ch-vline" y1="6" y2="{height - 26}"/>
         <circle class="ch-dot2" r="4.5"/>
@@ -150,6 +155,10 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
   var grid = root.querySelector(".ch-grid"), yaxis = root.querySelector(".ch-yaxis");
   var spans = root.querySelector(".ch-spans"), nowG = root.querySelector(".ch-now");
   var nowLine = root.querySelector(".ch-nowline"), statsEl = root.querySelector("[data-stats]");
+  var selRect = root.querySelector(".ch-sel");
+  var zoom = null;          // [startIdx, endIdx] into the active range, or null
+  var activeKey = null;     // which range is displayed
+  var dragFrom = null;
   var valEl = root.querySelector("[data-val]"), whenEl = root.querySelector("[data-when]");
   var W = 1000, H = CFG.height, PAD_B = 26, PAD_T = 6;
   var state = null;
@@ -179,7 +188,14 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
   function draw(key) {{
     var data = RANGES[key];
     if (!data || !data.points.length) return;
-    var pts = data.points;
+    activeKey = key;
+    var all = data.points;
+    // Zoom is a window into the active range, not a re-fetch. Selecting a
+    // slice of a month keeps the month's bucket size, which is honest: it
+    // shows the resolution actually held, rather than inventing detail that
+    // was aggregated away. Switch range for finer buckets.
+    var pts = zoom ? all.slice(zoom[0], zoom[1] + 1) : all;
+    if (pts.length < 2) pts = all;
 
     var lo = Infinity, hi = -Infinity;
     pts.forEach(function (p) {{ if (p.lo < lo) lo = p.lo; if (p.hi > hi) hi = p.hi; }});
@@ -326,11 +342,72 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
     show(last.m, last.t, state.intraday);
   }});
 
+  function idxAt(clientX) {{
+    if (!state) return 0;
+    var r = svg.getBoundingClientRect();
+    var vx = (clientX - r.left) / r.width * W;
+    var best = 0, bd = Infinity;
+    for (var i = 0; i < state.pts.length; i++) {{
+      var dd = Math.abs(state.X(i) - vx);
+      if (dd < bd) {{ bd = dd; best = i; }}
+    }}
+    return best;
+  }}
+
+  svg.addEventListener("pointerdown", function (e) {{
+    if (!state) return;
+    dragFrom = {{ i: idxAt(e.clientX), x: e.clientX }};
+    svg.setPointerCapture(e.pointerId);
+  }});
+  svg.addEventListener("pointermove", function (e) {{
+    if (dragFrom === null || !state) return;
+    var r = svg.getBoundingClientRect();
+    var x1 = Math.min(dragFrom.x, e.clientX) - r.left;
+    var x2 = Math.max(dragFrom.x, e.clientX) - r.left;
+    if (x2 - x1 < 3) return;
+    selRect.hidden = false;
+    selRect.setAttribute("x", (x1 / r.width * W).toFixed(1));
+    selRect.setAttribute("width", ((x2 - x1) / r.width * W).toFixed(1));
+    selRect.setAttribute("y", "0");
+    selRect.setAttribute("height", String(H));
+  }});
+  svg.addEventListener("pointerup", function (e) {{
+    selRect.hidden = true;
+    if (dragFrom === null || !state) {{ dragFrom = null; return; }}
+    var a = dragFrom.i, b = idxAt(e.clientX);
+    dragFrom = null;
+    if (Math.abs(b - a) < 2) return;              // a click, not a drag
+    var lo = Math.min(a, b), hi = Math.max(a, b);
+    // Indices are relative to what is displayed, so compose with any zoom
+    // already applied rather than replacing it.
+    var base = zoom ? zoom[0] : 0;
+    zoom = [base + lo, base + hi];
+    draw(activeKey);
+  }});
+
+  root.querySelectorAll(".ch-tools button").forEach(function (b) {{
+    b.addEventListener("click", function () {{
+      if (b.dataset.act === "reset") {{ zoom = null; draw(activeKey); return; }}
+      // CSV of exactly what is on screen — including the min and max the
+      // bucketing preserved, since those are the numbers a scheduler needs.
+      var rows = [["period_start_utc", "mean", "min", "max", "samples"]];
+      state.pts.forEach(function (p) {{
+        rows.push([new Date(p.t).toISOString(), p.m, p.lo, p.hi, p.n]);
+      }});
+      var csv = rows.map(function (r) {{ return r.join(","); }}).join("\n");
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([csv], {{type: "text/csv"}}));
+      a.download = {json.dumps(series.key)} + "_" + activeKey + ".csv";
+      a.click(); URL.revokeObjectURL(a.href);
+    }});
+  }});
+
   root.querySelectorAll(".ch-ranges button").forEach(function (b) {{
     b.addEventListener("click", function () {{
       if (b.disabled) return;
       root.querySelectorAll(".ch-ranges button").forEach(function (o) {{ o.classList.remove("on"); }});
       b.classList.add("on");
+      zoom = null;
       draw(b.dataset.r);
     }});
   }});
@@ -378,6 +455,13 @@ CHART_CSS = """
 .ch-dot2 { fill: var(--series); stroke: var(--card); stroke-width: 2; }
 .ch-tick { fill: var(--text-2); font-size: 11px; font-family: inherit; }
 svg [hidden] { display: none; }
+.ch-tools { display: inline-flex; gap: 4px; margin-left: 8px; }
+.ch-tools button { font: inherit; font-size: 12px; font-weight: 550;
+  padding: 5px 11px; border-radius: 980px; cursor: pointer;
+  border: 1px solid var(--sep); background: transparent; color: var(--text-2); }
+.ch-tools button:hover { color: var(--text); border-color: var(--text-3); }
+.ch-sel { fill: var(--series); opacity: .12; }
+.ch svg { cursor: crosshair; }
 """
 
 

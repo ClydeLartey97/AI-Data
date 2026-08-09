@@ -206,7 +206,7 @@ tr.nofit td{{opacity:.42}}
 
 <section class="card">
   <h2>Configuration</h2>
-  <p class="note">{note} Everything recomputes as you change it — nothing is precomputed, so a custom model works like any catalogue entry.</p>
+  <p class="note">{note}</p>
   <div class="controls">
     <div class="ctl"><label for="model">Model</label><select id="model">{model_opts}</select></div>
     <div class="ctl custom-only hide"><label for="cparams">Parameters (B)</label>
@@ -232,8 +232,7 @@ tr.nofit td{{opacity:.42}}
 
 <section class="card">
   <h2>On-site renewables</h2>
-  <p class="note">How much of this job's load your own generation could serve at a given place.
-    <span class="prov ESTIMATED">ESTIMATED</span></p>
+  <p class="note"><span class="prov ESTIMATED">ESTIMATED</span></p>
   <div class="controls">
     <div class="ctl"><label for="site">Location</label><select id="site">{site_opts}</select></div>
     <div class="ctl"><label for="solar">Solar capacity</label><select id="solar">{cap_opts}</select></div>
@@ -247,7 +246,7 @@ tr.nofit td{{opacity:.42}}
 
 <section class="card">
   <h2>Every device, ranked by energy</h2>
-  <p class="note">Same job, same count. Greyed rows don't fit in memory.</p>
+  <p class="note">Greyed rows don't fit in memory.</p>
   <div style="overflow-x:auto"><table id="cmp"><thead><tr>
     <th>Device</th><th>Runtime</th><th>Power</th><th>Energy</th><th>Memory</th><th>Cost</th><th>CO₂</th>
   </tr></thead><tbody></tbody></table></div>
@@ -255,7 +254,7 @@ tr.nofit td{{opacity:.42}}
 
 <section class="card">
   <h2>Does adding hardware help?</h2>
-  <p class="note">The selected device at every fleet size.</p>
+  
   <div style="overflow-x:auto"><table id="scale"><thead><tr>
     <th>Fleet</th><th>Runtime</th><th>Energy</th><th>Scaling</th><th>Memory</th>
   </tr></thead><tbody></tbody></table></div>

@@ -187,10 +187,8 @@ def _regions_card() -> str:
 <section class="card">
   <h2>Where, not just when</h2>
   <p class="note">
-    All 18 GB grid regions, live. <b>{html.escape(lo.name)} is at {lo.carbon_forecast:,.0f} gCO₂/kWh
-    while {html.escape(hi.name)} is at {hi.carbon_forecast:,.0f}</b>
-    {'— a ' + f'{spread:,.0f}' + '× spread across the same country at the same instant.' if spread and spread < 1000 else 'right now.'}
-    Moving a job is a bigger lever than delaying one.
+<b>{html.escape(lo.name)} {lo.carbon_forecast:,.0f}</b> ·
+    <b>{html.escape(hi.name)} {hi.carbon_forecast:,.0f}</b> gCO₂/kWh, same instant.
   </p>
   <div class="tiles">
     {_tile("Cleanest region", f"{lo.carbon_forecast:,.0f}", html.escape(lo.name) + " · gCO₂/kWh", accent="--carbon")}
@@ -203,11 +201,7 @@ def _regions_card() -> str:
     <thead><tr><th>Region</th><th>gCO₂/kWh</th><th>Leading sources</th><th></th></tr></thead>
     <tbody>{''.join(rows)}</tbody>
   </table></div>
-  <p class="note" style="margin:14px 0 0">
-    Carbon only. GB settles one national wholesale price, so moving a job north changes
-    its emissions and not its bill — locational <em>price</em> variation belongs to nodal
-    markets like CAISO and ERCOT, and is not claimed here.
-  </p>
+  <p class="note" style="margin:14px 0 0">Carbon only — GB settles one national price.</p>
 </section>"""
 
 
@@ -418,7 +412,6 @@ svg [hidden] {{ display: none; }}
 
 <section class="card">
   <h2>Right now</h2>
-  <p class="note">Half-hourly settlement periods, the grain the market itself settles on.</p>
   <div class="tiles">
     {_tile("Carbon intensity", f"{carbon[0]:,.0f}" if carbon[0] is not None else "—",
            "gCO₂/kWh · forecast", accent="--carbon")}
@@ -478,7 +471,7 @@ svg [hidden] {{ display: none; }}
 
 <section class="card">
   <h2>Carbon intensity</h2>
-  <p class="note">Forecast gCO₂/kWh. Shaded span is the carbon-optimal window for this job. Pick a range; hover to read any point.</p>
+  <p class="note">Shaded span = carbon-optimal window. Drag to zoom.</p>
   {chart(ChartSeries("carbon", "Carbon intensity", "gCO₂/kWh",
                      [(p.timestamp, p.carbon_intensity) for p in series],
                      "--carbon", 0,
@@ -488,7 +481,7 @@ svg [hidden] {{ display: none; }}
 
 <section class="card">
   <h2>Price</h2>
-  <p class="note">Day-ahead Market Index, £/MWh. Shaded span is the cost-optimal window. Pick a range; hover to read any point.</p>
+  <p class="note">Shaded span = cost-optimal window. Drag to zoom.</p>
   {chart(ChartSeries("price", "Day-ahead price", "£/MWh",
                      [(p.timestamp, p.price) for p in series],
                      "--price", 2, prefix="£",
@@ -498,7 +491,6 @@ svg [hidden] {{ display: none; }}
 
 <section class="card">
   <h2>Underlying data</h2>
-  <p class="note">Every half-hour behind the charts above.</p>
   <details>
     <summary>Show {len(series)} settlement periods</summary>
     <table>
