@@ -128,6 +128,24 @@ Worth understanding before writing more adapters, because it's why `gb_adapter.p
 - **The warehouse is one API over two backends**, routed by table name: SQLite for settlement-keyed feeds, Parquet+DuckDB for the high-volume per-BM-unit feeds (~10GB vs ~400GB). Callers never know which answers. Writes are idempotent by delete-then-append on `settlement_date`.
 - **Why this matters for us:** `GridDataPoint` is just a narrowed projection of a contract that already existed, and the settlement period is a natural scheduling decision slot. The calculation falls straight out — for a job drawing `P` kW over one period: `energy_kWh = P × 0.5`, `cost = energy_kWh × price_£MWh / 1000`, `carbon_g = energy_kWh × intensity_gCO2kWh`. A deadline-constrained flexible job is then a sliding-window argmin over a few hundred floats. No solver, no ML — which is exactly the transparent classical approach argued for in Open Questions.
 
+## Location awareness (built 2026-08-09)
+
+**Location turns out to be a bigger lever than time.** Time-shifting a job on the national signal saved 54% carbon. Moving it between GB regions, measured live: **North Scotland 0 gCO2/kWh (96% wind) against East Midlands 131, at the same instant.** Google's carbon-intelligent computing work shifts on both axes; this project now has the data to do the same.
+
+- `adapters/gb_regional.py` — all 18 GB grid regions, postcode -> region lookup (accepts full postcodes and normalises to the outward code), and a 48-hour forward half-hourly carbon forecast per region.
+- `adapters/weather.py` — Open-Meteo forecast for any lat/lon: temperature, solar radiation, 100 m wind speed, cloud cover. Public, keyless, **worldwide** — so unlike the GB carbon endpoints this already works for markets that have no adapter yet, and it is the feed the bespoke CAISO/ERCOT forecast work would build on.
+
+Weather explains carbon rather than merely sitting beside it — measured across the presets in one pass:
+
+| location | region | gCO2/kWh | wind 100m | usable wind |
+|---|---|---|---|---|
+| Thurso | North Scotland | 0 | 10.8 m/s | 83% |
+| Edinburgh | South Scotland | 1 | 8.5 m/s | 59% |
+| Manchester | North West England | 40 | 4.2 m/s | 19% |
+| London | London | 90 | 3.4 m/s | 14% |
+
+**The constraint that shapes the UI — in GB, location changes CARBON but not PRICE.** GB settles one national wholesale price, so moving a job from London to Scotland changes its emissions and nothing about its bill. Locational price variation is real but lives in nodal markets (CAISO, ERCOT) where thousands of nodes settle separately. A GB location control therefore drives carbon and weather only. **Never present a GB map as though it varied price** — that becomes true when the nodal-market adapters land, and not before.
+
 ## UI and deployment (decided 2026-08-09)
 
 **The real system cannot be a web portal, and this is forced, not preference.** A browser cannot read hardware power draw — NVML, `powermetrics`, `system_profiler`, Metal device enumeration are all unreachable from a web page. And a scheduler that defers a job to a window six hours out has to still be running six hours later. So the real system needs a local, long-lived process with OS access.
