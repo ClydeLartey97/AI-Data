@@ -194,6 +194,38 @@ Two separate steps, don't conflate them:
 - **Detection** (easy): enumerate what's present. NVIDIA/cloud → `nvidia-smi` / NVML (`pynvml`) lists every GPU + live stats. Apple Silicon → `system_profiler`, `sysctl` (`hw.perflevel0/1` for P-core/E-core counts), Metal's `MTLDevice` API for GPU.
 - **Profiling** (harder, more valuable): measure real efficiency under load rather than trust a spec sheet. NVML gives live power draw + utilization per NVIDIA GPU. macOS `powermetrics` (needs sudo) gives real per-component power draw — CPU, GPU, ANE — while a task runs. Fallback to known-spec lookup only when live measurement isn't available.
 
+## Auto hardware analysis, and how to prove it works (planned 2026-08-09)
+
+**The goal: nobody types in specs.** A simulation runs on the device, and from how it behaves the system derives what that hardware actually is — throughput, memory bandwidth, power curve, and how it scales. Manual spec entry is a stopgap.
+
+**The validation method is the valuable part, and it is genuinely falsifiable.** Run the profiler on hardware whose real specifications are already published, then compare what the algorithm derived against those known figures. If the derived numbers track the datasheet across several different devices, the algorithm can be trusted on hardware nobody has catalogued. If they diverge, that is a measurable error to fix, not a matter of opinion.
+
+That matters more than it might sound. Every simulator in this space asks to be taken on trust. This one can state an error bar: *"derived within X% of published spec across N devices."* That is a claim with a number attached, and it is the kind of thing that survives a technical audience.
+
+Sequence:
+1. Micro-benchmarks -> derive achievable FLOPS, memory bandwidth, sustained power. Start with what is measurable here: an M2 with 8 GB, using `powermetrics` for real watts.
+2. Compare derived against `hardware/catalog.py` published figures. Record the delta per device.
+3. Widen to whatever hardware can be borrowed or rented — a single cloud GPU-hour is enough for one calibration point.
+4. Only once the deltas are known and small: trust the profiler on uncatalogued hardware, and report the error bar alongside every derived figure.
+5. Then replace the analytical scaling model with **measured** scaling curves, which is the weakest part of the current simulator (see below).
+
+**Apple Silicon inverts the validation method, and is the stronger case for it.** Apple publishes core counts and sometimes memory bandwidth — and no GPU TFLOPS, no per-component TDP, nothing else the simulator needs. So `hardware/catalog.py`'s Apple rows are marked ESTIMATED, not SPEC: they are community benchmarks, not datasheet values. There is no ground truth to check a profiler against.
+
+But the architecture is uniform. An M2, an M3 Max and an M2 Ultra are the same GPU core design in different quantities with different memory bandwidth. That makes a different and arguably better test available:
+
+> Profile one Apple chip. Derive per-GPU-core throughput and per-core power. **Predict** a different Apple chip from its core count and bandwidth alone. Then measure that chip and see whether the prediction held.
+
+Matching a datasheet only shows you can reproduce a published number. Predicting an unmeasured device from constants derived on another one is a real out-of-sample test — the thing actually claimed when the profiler is pointed at uncatalogued hardware. Apple is the best platform to run it on precisely because the architecture is consistent and the specs are absent.
+
+The first calibration point is available now: the M2 in use here, 8 GB, `powermetrics` for real watts. The 8 GB limit caps it to small models, which is fine — deriving per-core constants does not need a large model.
+
+**Known weakness this would fix.** `core/workload.scaling_efficiency` models communication cost only — gradient all-reduce over the interconnect. Real large-run inefficiency also comes from pipeline bubbles, stragglers, load imbalance and failure recovery, none of which are modelled. So it reports ~99% efficiency at 32 devices where a real run might see 70-85%. Sound for comparing configurations; not a scaling prediction, and it must not be quoted as one.
+
+**Findings already worth keeping from the first simulator run** (70B training, 1B tokens):
+- **More devices does not save energy — it saves time.** 1x H100 and 32x H100 both consume ~197 kWh; only the runtime changes (281 h vs 8.9 h). Under near-perfect scaling, total energy is invariant.
+- **Hardware choice does save energy.** 8x A100 needs 333 kWh for the same job that 8x H100 does in 197 kWh — a 40% difference from device selection alone.
+- Together these say something useful about the whole project: the savings come from *which* hardware, *where*, and *when* — not from *how much*.
+
 ## Possible platform target: Apple Silicon companion demo
 
 Not yet committed — logged here so it isn't lost. Clyde's dream outcome is a warm-intro conversation with someone senior at Apple, same "build something credible, start a conversation" strategy as the core project (see [[project-grid-aware-scheduler]] memory).
