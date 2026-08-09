@@ -32,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from adapters.gb import GBAdapter
 from app.dashboard import render
+from app import simulator
 from core.grid import Job
 
 #: Market signals move on a half-hour boundary, so anything fresher than this
@@ -82,12 +83,16 @@ problem rather than a credentials one.</p>
 </div></body></html>"""
 
 
-def make_handler(days: int, job: Job, cache: _Cache):
+def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - stdlib naming
-            if self.path not in ("/", "/index.html"):
+            path = self.path.rstrip("/") or "/"
+            if path not in ("/", "/index.html", "/simulator"):
                 self.send_error(404, "Not found")
                 return
+
+            def build_simulator() -> str:
+                return simulator.render(simulator.build_matrix(), simulator._grid_context())
 
             def build() -> str:
                 end = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
@@ -98,7 +103,8 @@ def make_handler(days: int, job: Job, cache: _Cache):
                 return render(series, job, adapter.market_name, adapter.currency)
 
             try:
-                html, cached = cache.get(build)
+                target = sim_cache if path == "/simulator" else cache
+                html, cached = target.get(build_simulator if path == "/simulator" else build)
                 status = 200
             except Exception as exc:  # network down, API outage, bad date range
                 html, cached, status = _error_page(str(exc)), False, 503
@@ -110,7 +116,7 @@ def make_handler(days: int, job: Job, cache: _Cache):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
-            print(f"  {self.path} → {status} ({'cached' if cached else 'rebuilt from live data'})")
+            print(f"  {path} → {status} ({'cached' if cached else 'rebuilt from live data'})")
 
         def log_message(self, *args):  # quieter than the stdlib default
             pass
@@ -138,7 +144,7 @@ def main() -> None:
     url = f"http://localhost:{args.port}"
     # 127.0.0.1, not 0.0.0.0 — loopback only, so nothing outside this machine
     # can reach it.
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(args.days, job, _Cache()))
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(args.days, job, _Cache(), _Cache()))
 
     print(f"Grid Signal running at {url}")
     print("  Local only — nothing is exposed to the network. Ctrl-C to stop.")

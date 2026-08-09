@@ -247,6 +247,11 @@ h1 {{
   font-weight: 700; letter-spacing: -0.022em;
 }}
 .sub {{ color: var(--text-2); font-size: 17px; margin: 0; }}
+nav {{ margin-top: 16px; display: flex; gap: 8px; }}
+nav a {{ font-size: 13px; font-weight: 550; text-decoration: none; padding: 6px 14px;
+  border-radius: 980px; color: var(--text-2);
+  background: color-mix(in srgb, var(--text) 5%, transparent); }}
+nav a.on {{ background: var(--price); color: #fff; }}
 .badge {{
   display: inline-flex; align-items: center; gap: 6px;
   margin-top: 14px; padding: 5px 11px; border-radius: 980px;
@@ -332,6 +337,7 @@ svg [hidden] {{ display: none; }}
 <header>
   <h1>Grid Signal</h1>
   <p class="sub">{html.escape(market)} electricity market · {html.escape(now.strftime('%a %d %b'))} – {html.escape(series[-1].timestamp.strftime('%a %d %b %Y'))}</p>
+  <nav><a href="/" class="on">Grid</a><a href="/simulator">Simulator</a></nav>
   <div class="badge">MEASURED · live API data, {len(live_c)} of {len(series)} half-hours priced</div>
 </header>
 

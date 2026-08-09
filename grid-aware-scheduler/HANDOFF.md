@@ -228,6 +228,22 @@ Two separate steps, don't conflate them:
 - **Detection** (easy): enumerate what's present. NVIDIA/cloud → `nvidia-smi` / NVML (`pynvml`) lists every GPU + live stats. Apple Silicon → `system_profiler`, `sysctl` (`hw.perflevel0/1` for P-core/E-core counts), Metal's `MTLDevice` API for GPU.
 - **Profiling** (harder, more valuable): measure real efficiency under load rather than trust a spec sheet. NVML gives live power draw + utilization per NVIDIA GPU. macOS `powermetrics` (needs sudo) gives real per-component power draw — CPU, GPU, ANE — while a task runs. Fallback to known-spec lookup only when live measurement isn't available.
 
+## The portal — two pages (built 2026-08-09)
+
+Served together by `app/serve.py` at `http://localhost:8765`:
+
+- **`/` — Grid.** Live carbon and price, the scheduling decision, range-selector charts. Not finished: generation mix, region selection, weather, forward forecast.
+- **`/simulator` — Model simulator** (`app/simulator.py`). Pick a model, hardware, count and task; get runtime, power, energy, memory feasibility, and — via the live grid signal — cost and carbon. 840 configurations precomputed server-side and embedded, so every control is instant with no round trip.
+
+The simulator carries three views: the selected configuration, **every device ranked by energy** for the same job, and **the same device at every fleet size**. The second and third are where the argument lives, because they make two results visible at a glance:
+
+- Adding hardware does not save energy. 1x and 64x H100 both use ~22-23 kWh for the same job; only runtime moves (32.1 h to 31 min).
+- Choosing hardware does. On an 8B training run the spread across the catalogue is 16 kWh (H100 PCIe) to 370 kWh (M2) — over 20x, for identical work.
+
+Provenance is on screen as a badge, not buried: SPEC for datasheet-backed rows, ESTIMATED for Apple, where no vendor figures exist.
+
+**Still to build: page 3, the planner.** Given a job, a heterogeneous fleet ("3 NVIDIA, 2 Intel Arc, 1 AMD" or 25 H100s) and a deadline, decide how to split the work across devices and when to run each part, optimising cost and carbon together. `hardware/base.Fleet` already models heterogeneous groups and `core/workload` already splits work by achievable throughput; what is missing is placing those splits in *time* against the grid signal.
+
 ## Auto hardware analysis, and how to prove it works (planned 2026-08-09)
 
 **The goal: nobody types in specs.** A simulation runs on the device, and from how it behaves the system derives what that hardware actually is — throughput, memory bandwidth, power curve, and how it scales. Manual spec entry is a stopgap.
