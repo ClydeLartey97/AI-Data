@@ -25,7 +25,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from adapters.gb import GBAdapter
+from adapters.gb_regional import GBRegionalAdapter
+from adapters.weather import PRESETS, WeatherAdapter
 from core.grid import PERIOD_HOURS
+from core.renewables import solar_capacity_factor, wind_capacity_factor
 from core.workload import MODELS, Job, Task, estimate, memory_required_gb
 from hardware import catalog
 from hardware.base import Fleet, Group, Provenance
@@ -77,6 +80,36 @@ def build_matrix() -> dict:
     return out
 
 
+def build_sites(days: int = 2) -> dict:
+    """Per-location renewable capacity factors, hour by hour.
+
+    Only the capacity *factors* are precomputed here. The matching itself —
+    how much of a load on-site generation covers — depends on the job you
+    pick, so it is computed in the page as you change things. That split
+    keeps the payload small and every control instant.
+    """
+    weather, regional = WeatherAdapter(), GBRegionalAdapter()
+    sites: dict = {}
+    for loc in PRESETS:
+        try:
+            wx = weather.forecast(loc, days=days)
+            region = regional.for_postcode(loc.postcode) if loc.postcode else None
+            sites[loc.name] = {
+                "name": loc.name,
+                "lat": loc.latitude, "lon": loc.longitude,
+                "region": region.name if region else "—",
+                "carbon": region.carbon_forecast if region else None,
+                "mix": region.top_sources if region else [],
+                "solar": [round(solar_capacity_factor(w.solar_radiation_wm2,
+                                                      w.temperature_c), 4) for w in wx],
+                "wind": [round(wind_capacity_factor(w.wind_speed_100m_ms), 4) for w in wx],
+                "hours": [w.timestamp.strftime("%a %H:%M") for w in wx],
+            }
+        except Exception:
+            continue  # one unreachable location must not break the page
+    return sites
+
+
 def _grid_context(days: int = 2) -> dict:
     """Current grid prices, so energy can be priced honestly at both ends."""
     try:
@@ -102,7 +135,7 @@ def _grid_context(days: int = 2) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
-def render(matrix: dict, grid: dict) -> str:
+def render(matrix: dict, grid: dict, sites: dict) -> str:
     models = "".join(
         f'<option value="{k}">{html.escape(m.name)} · {m.params_b:g}B</option>'
         for k, m in MODELS.items())
@@ -110,6 +143,14 @@ def render(matrix: dict, grid: dict) -> str:
         f'<option value="{k}">{html.escape(d.vendor)} {html.escape(d.name)}</option>'
         for k, d in catalog.CATALOG.items())
     counts = "".join(f'<option value="{n}">{n}</option>' for n in COUNTS)
+    site_opts = "".join(f'<option value="{html.escape(k)}">{html.escape(k)}</option>'
+                        for k in sites)
+    # Spans the range that matters. A single 8x H100 node draws ~5 kW, so
+    # options must start small enough that matching is a real question —
+    # megawatt defaults against a kilowatt load trivially "match" 100% while
+    # curtailing almost everything, which teaches nothing.
+    cap_opts = "".join(f'<option value="{c}">{c:,} kW</option>'
+                       for c in (0, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 5000))
 
     grid_note = (
         f"Priced against live GB data, {html.escape(grid['from'])}–{html.escape(grid['to'])}."
@@ -158,8 +199,18 @@ margin-bottom:18px}}
 .controls{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}}
 .ctl{{display:flex;flex-direction:column;gap:6px}}
 .ctl label{{font-size:12px;color:var(--text-2);font-weight:510}}
-.ctl select{{font:inherit;font-size:14px;padding:9px 11px;border-radius:10px;
-border:1px solid var(--sep);background:var(--card);color:var(--text);cursor:pointer}}
+.ctl select{{font:inherit;font-size:14px;padding:9px 34px 9px 12px;border-radius:10px;
+border:1px solid var(--sep);background-color:var(--card);color:var(--text);cursor:pointer;
+-webkit-appearance:none;appearance:none;width:100%;
+/* Explicit chevron. Styling a select's background strips the native one on
+   macOS, which left these looking like static read-only fields. */
+background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%23888' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+background-repeat:no-repeat;background-position:right 12px center;
+transition:border-color .15s ease, box-shadow .15s ease}}
+.ctl select:hover{{border-color:var(--text-3)}}
+.ctl select:focus{{outline:none;border-color:var(--blue);
+box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 22%, transparent)}}
+.ctl select option{{background:var(--card);color:var(--text)}}
 .seg{{display:inline-flex;gap:3px;background:color-mix(in srgb,var(--text) 5%,transparent);
 padding:3px;border-radius:980px}}
 .seg button{{font:inherit;font-size:13px;font-weight:550;padding:7px 16px;border:0;
@@ -222,6 +273,28 @@ tr.nofit td{{opacity:.45}}
 </section>
 
 <section class="card">
+  <h2>On-site renewables</h2>
+  <p class="note">
+    How much of this job's load your own generation could actually serve at a
+    given place — and how much still has to come off the grid.
+    <span class="prov ESTIMATED">ESTIMATED</span>
+  </p>
+  <div class="controls">
+    <div class="ctl"><label for="site">Location</label><select id="site">{site_opts}</select></div>
+    <div class="ctl"><label for="solar">Solar capacity</label><select id="solar">{cap_opts}</select></div>
+    <div class="ctl"><label for="wind">Wind capacity</label><select id="wind">{cap_opts}</select></div>
+  </div>
+  <div class="tiles" id="rtiles"></div>
+  <div id="rgap"></div>
+  <div class="ctl" style="margin-top:18px">
+    <svg id="rchart" viewBox="0 0 1000 200" preserveAspectRatio="none"
+         style="width:100%;height:200px;overflow:visible" role="img"
+         aria-label="On-site generation against load, hour by hour"></svg>
+  </div>
+  <ul class="assum" id="rassum"></ul>
+</section>
+
+<section class="card">
   <h2>Every option, ranked by energy</h2>
   <p class="note">Same job, same count, every device in the catalogue. Greyed rows don't fit in memory.</p>
   <div style="overflow-x:auto"><table id="cmp">
@@ -246,9 +319,11 @@ tr.nofit td{{opacity:.45}}
 <script>
 var M = {json.dumps(matrix)};
 var GRID = {json.dumps(grid)};
+var SITES = {json.dumps(sites)};
 var COUNTS = {json.dumps(COUNTS)};
 var state = {{ model: Object.keys(M)[0], task: "training",
-               device: Object.keys(M[Object.keys(M)[0]]["training"].devices)[0], count: 8 }};
+               device: Object.keys(M[Object.keys(M)[0]]["training"].devices)[0], count: 8,
+               site: Object.keys(SITES)[0], solar: 10, wind: 5 }};
 
 function n(v, d) {{ return v.toLocaleString("en-GB", {{minimumFractionDigits:d, maximumFractionDigits:d}}); }}
 function dur(h) {{
@@ -259,6 +334,71 @@ function dur(h) {{
 }}
 function money(kwh, pMWh) {{ return kwh * pMWh / 1000; }}
 function co2kg(kwh, g) {{ return kwh * g / 1000; }}
+
+
+function renderRenewables(demandKw) {{
+  var s = SITES[state.site];
+  var el = document.getElementById("rtiles");
+  if (!s) {{ el.innerHTML = ""; return; }}
+
+  var n = s.solar.length, matched = 0, imported = 0, curtailed = 0, gen = 0, full = 0;
+  var avail = [];
+  for (var i = 0; i < n; i++) {{
+    var a = s.solar[i] * state.solar + s.wind[i] * state.wind;
+    avail.push(a); gen += a;
+    matched += Math.min(a, demandKw);
+    imported += Math.max(0, demandKw - a);
+    curtailed += Math.max(0, a - demandKw);
+    if (a >= demandKw) full++;
+  }}
+  var demandTot = demandKw * n;
+  var hourly = demandTot ? matched / demandTot * 100 : 0;
+  var annual = demandTot ? gen / demandTot * 100 : 0;
+
+  el.innerHTML =
+    tile("Hourly matched", n2(hourly,1) + "%", "of load served on-site, period by period") +
+    tile("Imported", n2(imported,0) + " kWh", "must come off the grid") +
+    tile("Curtailed", n2(curtailed,0) + " kWh", "generated with nowhere to go") +
+    tile("Fully covered", full + " / " + n + " h", "hours needing no grid at all") +
+    tile("Grid region", s.region, s.carbon === null ? "" : s.carbon + " gCO\u2082/kWh now");
+
+  // The gap between the two ways of counting is the entire point, so it is
+  // stated rather than left for the reader to compute.
+  document.getElementById("rgap").innerHTML = (annual > 100 && hourly < 99)
+    ? '<div class="warn" style="background:color-mix(in srgb,var(--orange) 12%,transparent);color:var(--orange)">' +
+      "<b>Generates " + n2(annual,0) + "% of what it needs, but only covers " + n2(hourly,1) +
+      "% of it.</b> Netting annual totals would call this fully renewable. Matching each " +
+      "period separately shows " + n2(imported,0) + " kWh still bought from the grid — the " +
+      "generation arrived when the load did not.</div>"
+    : "";
+
+  // Supply against demand, hour by hour.
+  var svg = document.getElementById("rchart");
+  var W = 1000, H = 200, PAD = 26;
+  var peak = Math.max(demandKw, Math.max.apply(null, avail)) || 1;
+  function X(i) {{ return n < 2 ? W/2 : (i/(n-1))*W; }}
+  function Y(v) {{ return PAD + (H - PAD*2) * (1 - v/peak); }}
+  var gline = "", i2;
+  for (i2 = 0; i2 < n; i2++) gline += (i2 ? "L" : "M") + X(i2).toFixed(1) + "," + Y(avail[i2]).toFixed(1);
+  var area = "M0," + Y(0).toFixed(1) + gline.slice(1) + "L" + W + "," + Y(0).toFixed(1) + "Z";
+  svg.innerHTML =
+    '<path d="' + area + '" fill="var(--green)" opacity=".16"/>' +
+    '<path d="' + gline + '" fill="none" stroke="var(--green)" stroke-width="2" ' +
+      'vector-effect="non-scaling-stroke"/>' +
+    '<line x1="0" y1="' + Y(demandKw).toFixed(1) + '" x2="' + W + '" y2="' + Y(demandKw).toFixed(1) +
+      '" stroke="var(--blue)" stroke-width="2" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>' +
+    '<text x="4" y="' + (Y(demandKw)-6).toFixed(1) + '" fill="var(--blue)" font-size="11">load ' +
+      n2(demandKw,0) + ' kW</text>' +
+    '<text x="4" y="14" fill="var(--text-2)" font-size="11">on-site generation, kW</text>';
+
+  document.getElementById("rassum").innerHTML = [
+    "PV from irradiance and air temperature, 80% performance ratio; wind from a generic 100 m turbine power curve (cut-in 3, rated 12, cut-out 25 m/s).",
+    "Computed locally from Open-Meteo rather than called out to Renewables.ninja \u2014 microseconds instead of seconds, at the cost of bias correction and a turbine-specific curve. Expect the shape to be right and the level optimistic.",
+    "Matching is per period. An annual average can read 100% while importing every night."
+  ].map(function (x) {{ return "<li>" + x + "</li>"; }}).join("");
+}}
+
+function n2(v,d) {{ return v.toLocaleString("en-GB",{{minimumFractionDigits:d,maximumFractionDigits:d}}); }}
 
 function current() {{
   var t = M[state.model][state.task];
@@ -328,6 +468,8 @@ function render() {{
       n(rr.mem,0) + " GB</td></tr>";
   }}).join("");
 
+  renderRenewables(r.kw);
+
   document.getElementById("foot").textContent =
     "Job: " + (c.t.tokens/1e9 >= 1 ? n(c.t.tokens/1e9,1) + "B" : n(c.t.tokens/1e6,0) + "M") +
     " tokens. Needs ~" + n(c.t.need,0) + " GB. " +
@@ -340,6 +482,15 @@ function tile(label, value, sub, prov) {{
     value + (prov ? '' : '') + '</div><div class="tile-sub">' + (sub || "") + "</div></div>";
 }}
 
+["site","solar","wind"].forEach(function (id) {{
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.value = String(state[id]);
+  el.addEventListener("change", function (e) {{
+    state[id] = (id === "site") ? e.target.value : +e.target.value;
+    render();
+  }});
+}});
 ["model","device","count"].forEach(function (id) {{
   document.getElementById(id).addEventListener("change", function (e) {{
     state[id] = id === "count" ? +e.target.value : e.target.value;
@@ -368,9 +519,11 @@ def main() -> None:
     matrix = build_matrix()
     print("Fetching grid context …")
     grid = _grid_context()
+    print("Fetching site weather …")
+    sites = build_sites()
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(render(matrix, grid), encoding="utf-8")
+    OUT.write_text(render(matrix, grid, sites), encoding="utf-8")
     combos = sum(len(t["devices"]) * len(COUNTS) for m in matrix.values() for t in m.values())
     print(f"{combos:,} configurations → {OUT}")
     if args.open:

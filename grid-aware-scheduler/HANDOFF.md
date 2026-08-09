@@ -242,6 +242,12 @@ The simulator carries three views: the selected configuration, **every device ra
 
 Provenance is on screen as a badge, not buried: SPEC for datasheet-backed rows, ESTIMATED for Apple, where no vendor figures exist.
 
+**On-site renewables (`core/renewables.py`, added 2026-08-09).** Given a location and installed solar/wind capacity, computes how much of a job's load on-site generation actually serves, period by period, and how much must still be imported.
+
+**Built rather than called out to Renewables.ninja, deliberately.** Renewables.ninja is better modelled — MERRA-2/SARAH reanalysis, real turbine curves, bias correction validated against metered output — but it needs a token, rate-limits to tens of requests an hour, and answers in seconds. A simulator that recomputes on a control change cannot live on that. The physics is a few lines and the inputs (irradiance, 100 m wind) are already fetched from Open-Meteo for the weather panel, so this runs locally in microseconds. What is given up, and it must be labelled ESTIMATED because of it: no bias correction, a generic turbine curve, no shading/soiling/downtime, and irradiance treated as plane-of-array. **Expect the shape right and the level optimistic.** Validating against Renewables.ninja on a handful of sites is the obvious next step — same "derive, then check against a known-good source" method as the hardware profiling.
+
+**The number that matters is hourly matching, not annual.** Measured live at Thurso with 500 kW of each: the site generates **191% of what it needs** across the period yet covers only **90% of it**, still importing 930 kWh — because the generation arrived when the load did not. Netting annual totals would call that fully renewable. This is what 24/7 carbon-free accounting means and why the page reports both figures side by side with the gap called out.
+
 **Still to build: page 3, the planner.** Given a job, a heterogeneous fleet ("3 NVIDIA, 2 Intel Arc, 1 AMD" or 25 H100s) and a deadline, decide how to split the work across devices and when to run each part, optimising cost and carbon together. `hardware/base.Fleet` already models heterogeneous groups and `core/workload` already splits work by achievable throughput; what is missing is placing those splits in *time* against the grid signal.
 
 ## Auto hardware analysis, and how to prove it works (planned 2026-08-09)
