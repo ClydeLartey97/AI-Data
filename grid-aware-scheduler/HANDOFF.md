@@ -144,11 +144,21 @@ The layering, each knowing only the one below it:
 
 **Two artefacts, two deployment stories, and they don't conflict:** the `demo/` simulator is a pitch/communication piece and is a static page that can ship on GitHub Pages for a shareable link; the scheduler is the real system and installs locally. Keep them separate.
 
-**Run the dashboard:**
+**Running it — two ways, and the difference matters:**
+
 ```bash
-~/venvs/national-grid/bin/python -m app.dashboard --days 3 --open
+# 1. Serve it (normal way). Rebuilds from live data on reload.
+~/venvs/national-grid/bin/python -m app.serve          # → http://localhost:8765
+
+# 2. Render one file (for sharing a snapshot, or offline).
+~/venvs/national-grid/bin/python -m app.dashboard --days 3 --open   # → file://…
 ```
-Output goes to `app/build/` (gitignored — it's generated, and regenerating it takes seconds).
+
+**"In the browser" is not "on the web", and the distinction is the whole architecture.** `app.dashboard` writes an HTML file that the browser opens off disk over `file://` — no server, nothing listening. `app.serve` runs a local process bound to `127.0.0.1` (loopback only — other machines on the network cannot reach it, and nothing outside can). Both are entirely local. Neither is hosted anywhere.
+
+That is exactly what makes the rest of the plan possible: a hosted web page could never read `powermetrics` or stay alive to launch a job deferred six hours out, but a local process serving a local page does both while still giving a browser-quality UI. Only fleet mode across multiple machines ever needs real hosting.
+
+Generated output lands in `app/build/` (gitignored — it rebuilds in seconds). The server caches for 5 minutes, since the underlying signals only move on a half-hour settlement boundary.
 
 **Charts:** the palette is Apple's system colours snapped to steps that pass a colour-accessibility validator in *both* light and dark — lightness band, chroma floor, colour-blind separation, normal-vision separation, and contrast against the surface. The dark series colours are deliberately **darker** than Apple's own dark system colours, which sit above the band a chart needs. Don't hand-edit `CARBON_*` / `PRICE_*` in `app/dashboard.py` without re-validating. Carbon and price get separate charts on purpose — never a dual y-axis.
 
@@ -247,4 +257,5 @@ Companion demo planned: an interactive visual simulator (slider for number of op
 - **Found that the two objectives genuinely conflict**: on real data the carbon-optimal window sometimes costs *more* than running immediately. Logged in Current State — the scheduler must be told its objective, it cannot infer it.
 - **Decided the deployment architecture** — see "UI and deployment" above. Short version: the real system cannot be a web portal because browsers cannot read hardware power draw, but a local process serving a browser UI gives both halves. Rejected Streamlit for visual control; the dashboard is hand-written HTML/CSS/SVG.
 - **Built `app/dashboard.py`**, an Apple-styled dashboard rendered from live market data. Palette validated for colour-blind separation and contrast in both light and dark. Rendered and inspected both modes, which caught three defects that unit tests could not: axis ticks labelling padded bounds rather than real data (a price series with a £2.84 floor was showing "-16"), a stray hover dot parked at the origin because SVG ignores the HTML `hidden` attribute, and a "the objectives disagree" panel firing on a £0.00 trade-off. All fixed. Worth repeating the habit: render the thing and look at it.
+- **Added `app/serve.py`** — a local server on `http://localhost:8765`, bound to loopback only, that rebuilds the page from live data on reload (5-minute cache; first load 1.3s, cached load 0.9ms). This is the normal way to run it; `app.dashboard` remains for rendering a single shareable file. Clarified in the doc that "in the browser" is not "on the web" — both paths are entirely local, and that is precisely what lets the real system read hardware power draw later.
 - **Recorded that `demo/` is a prototype, not a spec** — see the section above, added so this doesn't have to be re-explained in every future session.
