@@ -110,6 +110,7 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
       <span class="ch-when" data-when></span>
     </div>
     <div class="ch-stats" data-stats></div>
+    <span class="ch-toollabel">Range</span>
     <div class="ch-ranges">{pills}</div>
     <div class="ch-tools">
       <button type="button" data-act="reset" title="Reset zoom">Reset</button>
@@ -394,7 +395,7 @@ def chart(series: ChartSeries, *, height: int = 320, default_range: str = "1W") 
       state.pts.forEach(function (p) {{
         rows.push([new Date(p.t).toISOString(), p.m, p.lo, p.hi, p.n]);
       }});
-      var csv = rows.map(function (r) {{ return r.join(","); }}).join("\n");
+      var csv = rows.map(function (r) {{ return r.join(","); }}).join(String.fromCharCode(10));
       var a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([csv], {{type: "text/csv"}}));
       a.download = {json.dumps(series.key)} + "_" + activeKey + ".csv";
@@ -434,7 +435,7 @@ CHART_CSS = """
 .ch-when { display: block; font-size: 12px; color: var(--text-2);
   font-variant-numeric: tabular-nums; }
 
-.ch-ranges { margin-left: auto; display: inline-flex; gap: 4px;
+.ch-ranges { display: inline-flex; gap: 4px;
   background: color-mix(in srgb, var(--text) 5%, transparent);
   padding: 3px; border-radius: 980px; }
 .ch-ranges button { font: inherit; font-size: 12px; font-weight: 550;
@@ -455,6 +456,8 @@ CHART_CSS = """
 .ch-dot2 { fill: var(--series); stroke: var(--card); stroke-width: 2; }
 .ch-tick { fill: var(--text-2); font-size: 11px; font-family: inherit; }
 svg [hidden] { display: none; }
+.ch-toollabel { margin-left: auto; font-size: 12px; color: var(--text-2);
+  align-self: center; }
 .ch-tools { display: inline-flex; gap: 4px; margin-left: 8px; }
 .ch-tools button { font: inherit; font-size: 12px; font-weight: 550;
   padding: 5px 11px; border-radius: 980px; cursor: pointer;
