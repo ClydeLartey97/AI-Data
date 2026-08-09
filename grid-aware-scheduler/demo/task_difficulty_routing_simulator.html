@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Task-difficulty routing simulator — Grid-Aware GPU Scheduler</title>
+<style>
+  :root {
+    --bg: #ffffff; --surface-1: #f4f3ef; --text-primary: #1a1a18; --text-secondary: #5f5e5a;
+    --border: #d3d1c7; --accent: #1D9E75;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text-primary); max-width: 720px; margin: 3rem auto; padding: 0 1.5rem; }
+  h1 { font-size: 20px; font-weight: 500; }
+  p.note { color: var(--text-secondary); font-size: 14px; }
+  .row { display:flex; align-items:center; gap:12px; margin: 1rem 0; }
+  .row label { font-size:14px; color:var(--text-secondary); width:170px; flex-shrink:0; }
+  input[type=range] { flex:1; }
+  select { flex:1; padding: 6px; font-size: 14px; }
+  .cards { display:grid; grid-template-columns: repeat(2,1fr); gap:12px; margin: 1.5rem 0; }
+  .card { background: var(--surface-1); border-radius: 10px; padding: 1rem; }
+  .card p.label { font-size:13px; color:var(--text-secondary); margin:0 0 4px; }
+  .card p.value { font-size:24px; font-weight:500; margin:0; }
+  @keyframes flow { to { stroke-dashoffset: -40; } }
+  .route-active { animation: flow 0.6s linear infinite; }
+  text.t { fill: #1a1a18; }
+  text.ts { fill: #5f5e5a; }
+</style>
+</head>
+<body>
+  <h1>Task-difficulty routing simulator</h1>
+  <p class="note">Prototype for the grid-aware GPU scheduler project. Simulates how a task's difficulty (operation count &times; task-type weight) would route to hardware, before the real backend and hardware detection exist. See HANDOFF.md for full context.</p>
+
+  <div class="row">
+    <label for="ops">Number of operations</label>
+    <input type="range" min="1" max="100" value="30" step="1" id="ops" />
+    <span id="ops-out" style="min-width:36px; text-align:right; font-weight:500;">30</span>
+  </div>
+  <div class="row">
+    <label for="tasktype">Task type</label>
+    <select id="tasktype">
+      <option value="1.2">Complex math / logic</option>
+      <option value="0.9" selected>Pattern / vision</option>
+      <option value="0.6">Verbal / language</option>
+    </select>
+  </div>
+
+  <div class="cards">
+    <div class="card"><p class="label">Difficulty score</p><p class="value" id="score-out">0</p></div>
+    <div class="card"><p class="label">Routed to</p><p class="value" id="route-out" style="font-size:16px;">—</p></div>
+  </div>
+
+  <div id="viz"></div>
+
+  <script>
+    const targets = [
+      { id: 0, y: 30,  label: "CPU", sub: "low power", color: "#B4B2A9" },
+      { id: 1, y: 90,  label: "Efficient GPU", sub: "balanced", color: "#5DCAA5" },
+      { id: 2, y: 150, label: "Performance GPU", sub: "high throughput", color: "#F0997B" },
+      { id: 3, y: 210, label: "Multi-GPU cluster", sub: "max scale", color: "#AFA9EC" }
+    ];
+
+    function pathFor(y) {
+      const x0 = 90, y0 = 130, x1 = 430, y1 = y;
+      const cx0 = x0 + 140, cx1 = x1 - 140;
+      return `M ${x0} ${y0} C ${cx0} ${y0}, ${cx1} ${y1}, ${x1} ${y1}`;
+    }
+
+    function render() {
+      const ops = parseInt(document.getElementById("ops").value, 10);
+      const weight = parseFloat(document.getElementById("tasktype").value);
+      document.getElementById("ops-out").textContent = ops;
+      const raw = ops * weight;
+      const score = Math.round(Math.min(100, (raw / 1.2)));
+      document.getElementById("score-out").textContent = score;
+
+      let picked = 0;
+      if (score >= 75) picked = 3;
+      else if (score >= 45) picked = 2;
+      else if (score >= 20) picked = 1;
+      else picked = 0;
+
+      document.getElementById("route-out").textContent = targets[picked].label;
+
+      let paths = "";
+      let boxes = "";
+      targets.forEach((t, i) => {
+        const active = i === picked;
+        const d = pathFor(t.y);
+        paths += `<path d="${d}" fill="none" stroke="#d3d1c7" stroke-width="2" opacity="${active ? 0 : 0.6}"/>`;
+        if (active) {
+          paths += `<path d="${d}" fill="none" stroke="#1D9E75" stroke-width="3" stroke-dasharray="10 6" class="route-active"/>`;
+        }
+        boxes += `<g transform="translate(430, ${t.y - 22})">
+          <rect width="150" height="44" rx="8" fill="${t.color}" opacity="${active ? 1 : 0.35}"/>
+          <text x="12" y="18" class="t" font-size="13">${t.label}</text>
+          <text x="12" y="33" class="ts" font-size="11">${t.sub}</text>
+        </g>`;
+      });
+
+      const svg = `<svg viewBox="0 0 600 260" style="width:100%; height:auto;" role="img">
+        <title>Task routing diagram</title>
+        <g>
+          <rect x="20" y="105" width="90" height="50" rx="8" fill="#B4B2A9" opacity="0.7"/>
+          <text x="65" y="135" class="t" font-size="13" text-anchor="middle">Task</text>
+        </g>
+        ${paths}
+        ${boxes}
+      </svg>`;
+      document.getElementById("viz").innerHTML = svg;
+    }
+
+    document.getElementById("ops").addEventListener("input", render);
+    document.getElementById("tasktype").addEventListener("change", render);
+    render();
+  </script>
+</body>
+</html>

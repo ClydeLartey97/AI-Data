@@ -69,8 +69,16 @@ Given the above, straight prior art re-implementation is not a credible pitch. W
 - `adapters/gb_adapter.py` is now a REAL implementation, not a stub. It imports a sibling project, `AI Energy/National-Grid-Tool` (Clyde's own earlier GB power-market data project — 28 fetchers, SQLite+Parquet warehouse), and calls two of its clients directly: `sources/carbon_intensity/client.py` (Carbon Intensity API, public/keyless) and `sources/elexon/prices.py` (Elexon Insights Market Index Data, public/keyless).
 - Signal choice made (not yet validated on live data): uses `forecast_gco2_kwh` (not settled `actual`) and day-ahead Market Index price (not settlement system price), because a real scheduler only ever has forward-looking data when it decides — see the docstring at the top of `gb_adapter.py` for full reasoning. This is a judgment call, open to revisiting.
 - Join logic (settlement_date + settlement_period, averaging price across multiple Market Index providers) was verified offline against the National Grid Tool's own real test fixtures (`tests/fixtures/carbon_intensity_date.json`, `tests/fixtures/mid_2026-07-13.json`) — mechanically correct.
-- NOT yet verified: an actual live network call. That session's sandbox proxy blocked both `api.carbonintensity.org.uk` and `data.elexon.co.uk` (403 on CONNECT), so a real end-to-end run has to happen on Clyde's own machine, where the National Grid Tool already runs fine against these same hosts.
-- No GPU profile data collected yet. No scheduler logic written yet.
+- ~~NOT yet verified: an actual live network call.~~ **Superseded — the live call was made and passed on 2026-08-09.** (This line previously contradicted the "VERIFIED LIVE" bullet above and misled a later session into re-running work that was already done. Left visible rather than deleted, so the contradiction is a matter of record.)
+
+**Built 2026-08-09 (session 5) — the first working vertical slice:**
+- `adapters/gb.py` — **the corrected GB adapter, and the one to use.** Same signal choices, but price comes from a single preferred provider (`APXMIDP`) with non-positive prices dropped, instead of a mean across providers. Returns `GBPoint`, which carries `price_provider` and `settled_carbon` so every figure's provenance travels with it. `gb_adapter.py` is untouched and superseded — keep it for the record, don't build on it.
+- `core/grid.py` — **market-agnostic** scheduling algorithms and energy accounting. Knows nothing about GB. `Job`, `run_immediately` (naive baseline), `cheapest_window`, `cleanest_window`, `compare`. The allocator is a sliding-window minimum: no solver, no ML, microseconds to run.
+- `app/dashboard.py` — generates a self-contained HTML dashboard from live data. **Not Streamlit** (see "UI and deployment" below).
+- `tests/test_grid.py` — 15 offline tests, all passing, no network. Covers the accounting, deadline enforcement, inflexible jobs, and the rule that unpriced windows are never chosen (a window with missing data is not a cheap window).
+- **Real measured result** (GB, 2026-08-05→08, 6.5 kW job for 4 h, 24 h deadline): baseline £3.21 / 2.10 kgCO₂ → scheduled £0.21 / 0.97 kgCO₂. **93.6% cost and 54.0% carbon saved for an 11.5 h delay.** Verified against live data, with the corrected price path. Steps 5, 6 and 7 are substantially done.
+- Confirmed on real data that **cost-optimal and carbon-optimal windows can disagree**, sometimes with the cleanest window costing *more* than running immediately. The scheduler has to be told which objective it is serving; it cannot infer it. The dashboard surfaces this only when the trade-off is material (≥2% cost penalty), because a bare index comparison fires on windows a single period apart that cost the same to a penny.
+- No GPU profile data collected yet — hardware detection (step 4) is the remaining gap, and now the only thing standing between this and the full pitch.
 
 ## Next steps (in order)
 
@@ -78,10 +86,10 @@ Given the above, straight prior art re-implementation is not a credible pitch. W
 2. [x] Build `adapters/gb_adapter.py` — pull GB carbon intensity (National Grid ESO / Carbon Intensity API) and day-ahead price data — **DONE and now VERIFIED LIVE on Clyde's Mac** (2026-08-09). Works end to end.
 3. [x] Confirm the common data format works by printing one week of GB data — done, 289 points, join holds. Plot still outstanding, but the format is proven. Note the price bug in Current State before trusting any £ figure.
 3b. [ ] Route the adapter through the National Grid Tool's warehouse (`warehouse/store.py`) with fetch-on-miss, instead of hitting live APIs on every call. Reuses the layer that already solves this, makes repeat backtests instant, and unblocks pulling settlement actuals (`disebsp`, already in that project's `DATASETS` registry) for scoring realised performance.
-4. [ ] Build a hardware detection + profiling module (replaces the static `gpu_profiles.csv` idea — see "Hardware detection" below for reasoning)
-5. [ ] Build `scheduler/scheduler.py` — the naive baseline first (run everything immediately, max power)
-6. [ ] Build the actual grid-aware + hardware-aware allocation logic
-7. [ ] Produce one comparison chart: naive baseline vs. scheduler, on real GB data
+4. [ ] **← YOU ARE HERE.** Build a hardware detection + profiling module (replaces the static `gpu_profiles.csv` idea — see "Hardware detection" below). Build it behind a `HardwareProvider` interface with **two** implementations, exactly mirroring the market-adapter split: `LocalDetector` (real — NVML / `powermetrics` / `system_profiler`) and `SimulatedFleet` (reads a fleet YAML, so a multi-GPU cluster can be developed and demoed on a laptop). Every device figure carries a `source` field — `MEASURED` / `SPEC` / `SIMULATED` — so the UI can never present a config file as a measurement.
+5. [x] Build the naive baseline — `core/grid.run_immediately`. Done, tested.
+6. [x] Build the grid-aware allocation logic — `core/grid.cheapest_window` / `cleanest_window`. Done, tested. **Hardware-aware allocation still outstanding** and depends on step 4.
+7. [x] Produce the comparison, naive baseline vs. scheduler, on real GB data — done, and live in the dashboard rather than as a static chart. 93.6% cost / 54.0% carbon saved on a real 3-day window.
 8. [ ] Only then: build `adapters/caiso_adapter.py` and `adapters/ercot_adapter.py`, reusing the same interface
 9. [ ] Write the half-page explainer in `docs/` citing prior art honestly
 
@@ -120,6 +128,36 @@ Worth understanding before writing more adapters, because it's why `gb_adapter.p
 - **The warehouse is one API over two backends**, routed by table name: SQLite for settlement-keyed feeds, Parquet+DuckDB for the high-volume per-BM-unit feeds (~10GB vs ~400GB). Callers never know which answers. Writes are idempotent by delete-then-append on `settlement_date`.
 - **Why this matters for us:** `GridDataPoint` is just a narrowed projection of a contract that already existed, and the settlement period is a natural scheduling decision slot. The calculation falls straight out — for a job drawing `P` kW over one period: `energy_kWh = P × 0.5`, `cost = energy_kWh × price_£MWh / 1000`, `carbon_g = energy_kWh × intensity_gCO2kWh`. A deadline-constrained flexible job is then a sliding-window argmin over a few hundred floats. No solver, no ML — which is exactly the transparent classical approach argued for in Open Questions.
 
+## UI and deployment (decided 2026-08-09)
+
+**The real system cannot be a web portal, and this is forced, not preference.** A browser cannot read hardware power draw — NVML, `powermetrics`, `system_profiler`, Metal device enumeration are all unreachable from a web page. And a scheduler that defers a job to a window six hours out has to still be running six hours later. So the real system needs a local, long-lived process with OS access.
+
+**But "web portal vs desktop app" is a false binary.** The answer is a local process serving a browser UI — how Jupyter, Ollama and the National Grid Tool itself all work. Browser-based UI with instant iteration and no packaging, on top of a native process with unrestricted hardware access. No code signing, no notarisation, no per-platform builds.
+
+**Not Streamlit, though.** It imposes a strong visual identity that can't be reshaped into a native-feeling interface without CSS overrides that break on version bumps. `app/dashboard.py` instead generates plain HTML/CSS/SVG we own outright — no framework, no CDN, no build step, one file that opens in any browser. The Apple-style design language is deliberate.
+
+The layering, each knowing only the one below it:
+
+1. **Core engine** (`core/`, `adapters/`) — importable, testable, no UI, no server. *This is the actual product.*
+2. **Agent** — the long-lived local process: detects hardware, holds the job queue, wakes to launch deferred jobs. Later a `launchd`/`systemd` service. Not built yet.
+3. **UI** (`app/`) — thin and replaceable.
+
+**Two artefacts, two deployment stories, and they don't conflict:** the `demo/` simulator is a pitch/communication piece and is a static page that can ship on GitHub Pages for a shareable link; the scheduler is the real system and installs locally. Keep them separate.
+
+**Run the dashboard:**
+```bash
+~/venvs/national-grid/bin/python -m app.dashboard --days 3 --open
+```
+Output goes to `app/build/` (gitignored — it's generated, and regenerating it takes seconds).
+
+**Charts:** the palette is Apple's system colours snapped to steps that pass a colour-accessibility validator in *both* light and dark — lightness band, chroma floor, colour-blind separation, normal-vision separation, and contrast against the surface. The dark series colours are deliberately **darker** than Apple's own dark system colours, which sit above the band a chart needs. Don't hand-edit `CARBON_*` / `PRICE_*` in `app/dashboard.py` without re-validating. Carbon and price get separate charts on purpose — never a dual y-axis.
+
+## A note on the `demo/` simulator
+
+`demo/task_difficulty_routing_simulator.html` is a **throwaway communication prototype**, not a spec. A slider for operation count, a dropdown for task type, four fixed hardware tiers. It exists to make the task-difficulty-routing idea visible before the real thing exists.
+
+Do not let its simplicity anchor scope. The real system replaces every part of it: real task classification instead of a dropdown, auto-detected and benchmarked hardware instead of four labelled boxes, real multi-GPU topology and interconnect awareness, and grid-signal timing feeding the routing decision — all at once. Keep the prototype as a reference for the interaction idea; build nothing from its structure.
+
 ## Hardware detection (replaces static GPU profile CSV)
 
 Decided 2026-08-09: instead of hand-curating a CSV of published GPU specs, the profiling module should auto-detect whatever compute units are actually present on the machine it's running on, then either match against known specs or empirically benchmark on the fly. This is more credible than trusting published TDP numbers (which are idealized) and works on hardware nobody's pre-catalogued.
@@ -137,6 +175,24 @@ The core architecture (fleet of interchangeable GPUs + wholesale grid market pri
 Framing discipline (same rule as the rest of this project): Core ML already does automatic compute-unit dispatch. Any write-up must be honest that this adds cost/time-of-use awareness on top of existing dispatch, not that it invents compute-unit selection from scratch.
 
 Plan if pursued: keep the cloud/DC version as the primary credibility piece (real prior art, real stakes, matches the current AI-datacenter-energy story). Build the Apple Silicon variant as a second, smaller companion demo aimed specifically at an Apple conversation, since it speaks their language (performance-per-watt, on-device ML) more directly.
+
+## Scope decisions from 2026-08-09 planning session
+
+No fixed deadline for showing this to anyone — pace is set by getting things genuinely right, not by a target date. Building on existing published research/reasoning (Compute Gardener, Eco-Orchestrator, Zeus/Perseus, academic carbon-forecast methodology) and improving on it with better execution is legitimate and should be cited, not treated as something to avoid referencing.
+
+**Forecasting — researched, decision made:** checked whether GB's National Grid ESO Carbon Intensity forecast is already "genuinely direct from source" (Clyde's own bar for whether a bespoke model is worth building). Answer: yes, for GB specifically. It's built with University of Oxford Dept of Computer Science + Met Office weather data + WWF/EDF Europe, uses ML model ensembling into an optimised meta-model, a full reduced GB network power-flow model (active/reactive flows, system losses, impedance), regional granularity, nowcasting updates every 30 min, 96+ hours ahead. This is not a naive model — trying to out-forecast it specifically for GB is not a good use of effort.
+
+However: CAISO and ERCOT do **not** have an equivalent free, transparent, operator-published forecast. Public access there runs through third parties (WattTime MOER, Electricity Maps — often paywalled/subscription, EIA raw generation-mix data) rather than a documented in-house model like GB's. That's real, verified room for a bespoke forecast to add value — not by beating GB, but by providing something methodologically transparent that doesn't otherwise exist for free in those markets.
+
+**Decision:** build an own forecasting model, grounded in published research methodology (not invented from scratch), pulling from multiple sources (not just one grid operator's feed). Validate it first against GB's published forecast as the best available ground truth (since GB's is known-good), then apply the validated methodology to CAISO/ERCOT where no free equivalent exists. Do not claim it beats GB's forecast — frame it as consistent, transparent methodology extended to markets that lack GB's infrastructure.
+
+**Hardware scope — decision:** include multi-GPU topology/interconnect-aware clustering (how GPUs work together in groups, not just individual device benchmarking) in scope now, not deferred to later. This is harder than single-device profiling but is core to the vision of auto-arranging clusters, not an add-on.
+
+**Primary differentiator — decision:** task-difficulty-based routing (classifying a task's difficulty — e.g. complex math vs. verbal reasoning — and routing it to the right hardware/cluster configuration, combined with grid-aware timing) is the main focus. This remains the one piece not found anywhere in existing prior art (Compute Gardener, Eco-Orchestrator are task/content-agnostic — they schedule by resource request, not inferred task difficulty).
+
+Companion demo planned: an interactive visual simulator (slider for number of operations + task type, animated branching-path visualization showing which hardware/route a task would take) to communicate the concept before the real backend and hardware detection exist. Lives separately from the core scheduler code (e.g. `notebooks/` or a new `demo/` folder) — a prototype/pitch tool, not production logic.
+
+**Relation to prior art — decision:** study Compute Gardener and Eco-Orchestrator's source/papers for reasoning and design choices, but build an independent implementation. No direct code reuse, no plan to contribute upstream to Compute Gardener at this time.
 
 ## Open questions / decisions not yet made
 
@@ -168,6 +224,9 @@ Plan if pursued: keep the cloud/DC version as the primary credibility piece (rea
 - Discussed and logged a real architecture improvement: replace the planned static `gpu_profiles.csv` (hand-curated published specs) with a hardware detection + profiling module that auto-detects whatever compute units are actually present and empirically measures their efficiency (NVML for NVIDIA, `powermetrics`/`system_profiler` for Apple Silicon) rather than trusting spec sheets. See "Hardware detection" section above. This replaces step 4 in Next Steps.
 - Discussed, and logged as NOT YET COMMITTED, a possible Apple Silicon companion demo aimed at a warm-intro conversation with someone at Apple — see "Possible platform target: Apple Silicon companion demo" section above for the honest technical mapping and the framing discipline required.
 - Clyde asked directly: "has anyone done the whole project already." Researched via web search. Found this has substantially been done: **Compute Gardener** (github.com/elevated-systems/compute-gardener-scheduler) is an active open-source Kubernetes scheduler combining carbon/price-aware temporal shifting with hardware power-profile-aware placement, including GPU workload classification — essentially both of this project's pillars, already shipped. **Eco-Orchestrator/CARL** is an academic RL-based system doing the same combination, tested on 64 A100s, 34.7% carbon reduction reported. Corrected the Prior Art table and retracted the "nobody has done both together" gap claim — it was wrong and must not be repeated in any pitch. Added a "Where the real gap might still be" section: Apple Silicon/on-device is the one angle nothing found so far covers. Recommended reading Compute Gardener's actual source before writing more scheduler code, to avoid unknowingly rebuilding it.
+- Went deeper on comparing mechanics, not just concepts: verified from the actual KubeFM transcript that Compute Gardener's "price-aware" scheduling is a fixed time-of-use schedule (residential/commercial rate structure), not real wholesale day-ahead market price — a real, meaningful difference from this project's Elexon day-ahead Market Index Price signal. Also confirmed Compute Gardener's GPU power profiling already uses live NVIDIA DCGM measurement, not static specs, which undercuts (not confirms) the novelty of this project's planned hardware auto-benchmarking — logged honestly rather than oversold.
+- Clyde laid out an expanded, more ambitious vision: (1) a bespoke weather+multi-source-driven electricity generation/carbon forecast model grounded in research papers, (2) multi-GPU topology/interconnect-aware clustering (not just per-device benchmarking), (3) task-difficulty-based routing (classify task difficulty, e.g. complex math vs. verbal reasoning, route to best-suited hardware/cluster) combined with grid-timing, (4) deadline-guaranteed scheduling ("after 5 hours, x is done"). Researched and logged decisions — see "Scope decisions from 2026-08-09 planning session" above for full detail on each. Key finding: GB's National Grid ESO forecast is genuinely sophisticated (Oxford CS + Met Office + full network power-flow model) and not worth trying to beat directly; CAISO/ERCOT lack an equivalent free transparent operator forecast, which is where a bespoke model has real room to add value. Task-difficulty-based routing confirmed as the primary differentiator (not found in any prior art). Multi-GPU topology work pulled into current scope rather than deferred. Decided to study Compute Gardener/Eco-Orchestrator independently rather than reuse or contribute code.
+- Building an interactive visual simulator/prototype for task-difficulty-based routing per Clyde's request (slider for number of operations + task type, animated path visualization) — see file in `demo/` if created this session.
 
 ### 2026-08-09 — session 4, later the same day
 - Clyde moved `National-Grid-Tool` into `AI Energy/` (it had been sitting at `Desktop/National-Grid-Tool`), which is exactly where `gb_adapter.py`'s default path expects it. The import path issue that would have blocked step 2 is therefore gone.
@@ -177,3 +236,15 @@ Plan if pursued: keep the cloud/DC version as the primary credibility piece (rea
 - **Found a real bug in the price path** by inspecting live provider-level data: `N2EXMIDP` publishes structural zeros, so averaging across MID providers halves every price (measured £57.44 vs true £115.00), and in Nov 2025 does so non-uniformly, distorting curve shape not just level. Clyde's call: **do not patch the current adapter** — carry it forward and build it correctly in the real implementation. Logged in Current State and resolves Open Question #2.
 - **Initialised this folder as a git repository** with a `.gitignore`, and recorded in "External dependency" that the National Grid Tool stays out of it — separate production tool, imported at runtime, explicitly not to be renamed or stripped.
 - Added an "Architecture we're borrowing" section documenting how the National Grid Tool actually works (settlement-period grid as universal join key, the layering, the two-backend warehouse) and how the cost/carbon calculation falls out of it.
+
+### 2026-08-09 — session 5, same day
+- **Caught up and found the doc was contradicting itself.** Current State said the adapter was "VERIFIED LIVE" in one bullet and "NOT yet verified" three bullets later, which led this session's opening instructions to ask for live verification that had already been done. Fixed, and the stale line left struck through rather than deleted so the failure mode is on the record. Lesson worth keeping: when marking something done, delete or strike the line that said it wasn't.
+- **Built the first working vertical slice — real data end to end into a real decision.**
+  - `adapters/gb.py`: corrected GB adapter. Price now comes from `APXMIDP` alone with non-positive values dropped, never a cross-provider mean. Verified: mean £111.91 over a real 2-day window, against the £57-ish the old averaging path produced. `gb_adapter.py` left untouched and superseded.
+  - `core/grid.py`: market-agnostic accounting and algorithms — `run_immediately` (baseline), `cheapest_window`, `cleanest_window`, `compare`. Sliding-window minimum, no solver, no ML, per the reasoning already recorded in Open Questions.
+  - `tests/test_grid.py`: 15 offline tests, all passing, zero network. Includes the rule that a window with missing price data is never selected — an unpriced window is not a cheap one.
+- **Measured a real result:** 6.5 kW job, 4 h, 24 h deadline, GB 2026-08-05→08 → £3.21 to £0.21 and 2.10 to 0.97 kgCO₂. **93.6% cost, 54.0% carbon, for an 11.5 h delay.** Steps 5-7 substantially complete.
+- **Found that the two objectives genuinely conflict**: on real data the carbon-optimal window sometimes costs *more* than running immediately. Logged in Current State — the scheduler must be told its objective, it cannot infer it.
+- **Decided the deployment architecture** — see "UI and deployment" above. Short version: the real system cannot be a web portal because browsers cannot read hardware power draw, but a local process serving a browser UI gives both halves. Rejected Streamlit for visual control; the dashboard is hand-written HTML/CSS/SVG.
+- **Built `app/dashboard.py`**, an Apple-styled dashboard rendered from live market data. Palette validated for colour-blind separation and contrast in both light and dark. Rendered and inspected both modes, which caught three defects that unit tests could not: axis ticks labelling padded bounds rather than real data (a price series with a £2.84 floor was showing "-16"), a stray hover dot parked at the origin because SVG ignores the HTML `hidden` attribute, and a "the objectives disagree" panel firing on a £0.00 trade-off. All fixed. Worth repeating the habit: render the thing and look at it.
+- **Recorded that `demo/` is a prototype, not a spec** — see the section above, added so this doesn't have to be re-explained in every future session.

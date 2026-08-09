@@ -34,3 +34,6 @@ env/
 
 # --- os --------------------------------------------------------------------
 .DS_Store
+
+# generated dashboard output + screenshots — rebuilt by `python -m app.dashboard`
+**/app/build/
