@@ -16,9 +16,13 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from core.energy import (EnergyDispatchResult, SiteEnergyProfile,
+                         dispatch_energy)
 from core.evidence import WORK_UNITS
 from core.planner import (PERIOD_HOURS, PlanOption, PlanningCandidate,
                           PlanningRequest, enumerate_options)
+
+ENERGY_PRIORITIES = frozenset({"renewable", "carbon_free", "carbon", "cost"})
 
 
 @dataclass(frozen=True)
@@ -87,6 +91,8 @@ class PortfolioPolicy:
     max_total_cost: float | None = None
     max_total_carbon_kg: float | None = None
     max_search_combinations: int = 1_000_000
+    energy_profiles: tuple[SiteEnergyProfile, ...] = ()
+    energy_priority: str = "renewable"
 
     def __post_init__(self) -> None:
         if not self.capacities:
@@ -94,6 +100,17 @@ class PortfolioPolicy:
         keys = [capacity.key for capacity in self.capacities]
         if len(keys) != len(set(keys)):
             raise ValueError("site capacities must have unique market/location keys")
+        profile_keys = [profile.key for profile in self.energy_profiles]
+        if len(profile_keys) != len(set(profile_keys)):
+            raise ValueError("site energy profiles must have unique market/location keys")
+        if self.energy_profiles and set(profile_keys) != set(keys):
+            raise ValueError(
+                "energy profiles must cover every configured facility site"
+            )
+        if self.energy_priority not in ENERGY_PRIORITIES:
+            raise ValueError(
+                f"energy_priority must be one of {sorted(ENERGY_PRIORITIES)}"
+            )
         for name, value in (
             ("max_total_cost", self.max_total_cost),
             ("max_total_carbon_kg", self.max_total_carbon_kg),
@@ -129,6 +146,7 @@ class PortfolioResult:
     search_space_upper_bound: int
     exact: bool = True
     rejected: dict[str, str] = field(default_factory=dict)
+    energy_dispatches: tuple[EnergyDispatchResult, ...] = ()
 
     @property
     def carbon_productivity(self) -> float:
@@ -172,22 +190,32 @@ def _job_options(job: PortfolioJob) -> tuple[list[PlanOption], dict[str, str]]:
     return options, rejected
 
 
-def _occupied_slots(option: PlanOption) -> list[tuple[str, str, datetime, float]]:
+def _occupied_slots(
+    option: PlanOption,
+    energy_profile: SiteEnergyProfile | None = None,
+) -> list[tuple[str, str, datetime, float, float]]:
     candidate = option.candidate
     remaining = candidate.runtime_hours
-    slots: list[tuple[str, str, datetime, float]] = []
+    slots: list[tuple[str, str, datetime, float, float]] = []
     for point in candidate.series[
         option.start_index:option.start_index + candidate.duration_periods
     ]:
         if remaining <= 1e-9:
             break
+        pue = candidate.pue
+        if energy_profile is not None:
+            interval = energy_profile.facility_at(point.timestamp)
+            if interval.pue is not None:
+                pue = interval.pue
+        hours = min(PERIOD_HOURS, remaining)
         slots.append((
             candidate.market,
             candidate.location,
             point.timestamp,
-            candidate.facility_power_kw,
+            candidate.it_power_kw * pue,
+            hours,
         ))
-        remaining -= min(PERIOD_HOURS, remaining)
+        remaining -= hours
     return slots
 
 
@@ -244,6 +272,7 @@ def optimise_portfolio(jobs: list[PortfolioJob],
         raise ValueError("portfolio cannot rank mixed currencies")
 
     capacity = {item.key: item.max_facility_power_kw for item in policy.capacities}
+    energy_profiles = {profile.key: profile for profile in policy.energy_profiles}
     options_by_job: list[tuple[PortfolioJob, list[PlanOption]]] = []
     rejected: dict[str, str] = {}
     for job in ordered_jobs:
@@ -257,11 +286,11 @@ def optimise_portfolio(jobs: list[PortfolioJob],
             sites = ", ".join(f"{market}/{location}"
                               for market, location in sorted(unknown_sites))
             raise ValueError(f"no facility capacity supplied for {sites}")
-        options = [
-            option for option in options
-            if option.candidate.facility_power_kw
+        options = [option for option in options if (
+            (option.candidate.market, option.candidate.location) in energy_profiles
+            or option.candidate.facility_power_kw
             <= capacity[(option.candidate.market, option.candidate.location)] + 1e-9
-        ]
+        )]
         if not options:
             reason = next(iter(option_rejections.values()),
                           "no complete price/carbon window inside the job window")
@@ -290,25 +319,124 @@ def optimise_portfolio(jobs: list[PortfolioJob],
     selected: list[PortfolioAssignment] = []
     selected_by_job: dict[str, PortfolioAssignment] = {}
     best_assignments: list[PortfolioAssignment] | None = None
+    best_dispatches: tuple[EnergyDispatchResult, ...] = ()
     best_key: tuple | None = None
     considered = 0
 
     def recurse(index: int, utility: float, cost: float, carbon: float,
                 energy: float, delay: float) -> None:
-        nonlocal best_assignments, best_key, considered
+        nonlocal best_assignments, best_dispatches, best_key, considered
         if best_key is not None and utility + remaining_utility[index] < -best_key[0] - 1e-12:
             return
         if index == len(options_by_job):
             considered += 1
+            evaluated_cost = cost
+            evaluated_carbon = carbon
+            evaluated_carbon_free = 0.0
+            evaluated_renewable = 0.0
+            evaluated_curtailment = 0.0
+            evaluated_energy = energy
+            evaluated_dispatches: tuple[EnergyDispatchResult, ...] = ()
+            if energy_profiles:
+                loads_by_site: dict[
+                    tuple[str, str], dict[str, dict[datetime, float]]
+                ] = {key: {} for key in energy_profiles}
+                for assignment in selected:
+                    option = assignment.option
+                    site_key = (
+                        option.candidate.market, option.candidate.location,
+                    )
+                    loads = loads_by_site[site_key].setdefault(
+                        assignment.job.job_id, {}
+                    )
+                    for _, _, timestamp, power, hours in _occupied_slots(
+                        option, energy_profiles[site_key],
+                    ):
+                        average_power = power * hours / PERIOD_HOURS
+                        loads[timestamp] = (
+                            loads.get(timestamp, 0.0) + average_power
+                        )
+                dispatches = tuple(
+                    dispatch_energy(profile, loads_by_site[site_key])
+                    for site_key, profile in sorted(energy_profiles.items())
+                )
+                if not all(dispatch.feasible for dispatch in dispatches):
+                    return
+                evaluated_cost = sum(
+                    dispatch.ai_cost for dispatch in dispatches
+                )
+                evaluated_carbon = sum(
+                    dispatch.ai_carbon_kg for dispatch in dispatches
+                )
+                evaluated_carbon_free = sum(
+                    dispatch.ai_carbon_free_kwh for dispatch in dispatches
+                )
+                evaluated_renewable = sum(
+                    dispatch.ai_renewable_kwh for dispatch in dispatches
+                )
+                evaluated_curtailment = sum(
+                    dispatch.curtailed_kwh for dispatch in dispatches
+                )
+                evaluated_energy = sum(
+                    dispatch.ai_energy_kwh for dispatch in dispatches
+                )
+                if (policy.max_total_cost is not None
+                        and evaluated_cost > policy.max_total_cost + 1e-12):
+                    return
+                if (policy.max_total_carbon_kg is not None
+                        and evaluated_carbon
+                        > policy.max_total_carbon_kg + 1e-12):
+                    return
+                evaluated_dispatches = dispatches
             signature = tuple(sorted(
                 (assignment.job.job_id, assignment.option.start_time.isoformat(),
                  assignment.option.candidate.key)
                 for assignment in selected
             ))
-            key = (-utility, carbon, cost, delay, signature)
+            renewable_match = (
+                evaluated_renewable / evaluated_energy
+                if evaluated_energy > 1e-12 else 0.0
+            )
+            carbon_free_match = (
+                evaluated_carbon_free / evaluated_energy
+                if evaluated_energy > 1e-12 else 0.0
+            )
+            energy_orders = {
+                "renewable": (
+                    -renewable_match, -carbon_free_match,
+                    evaluated_carbon, evaluated_cost,
+                ),
+                "carbon_free": (
+                    -carbon_free_match, -renewable_match,
+                    evaluated_carbon, evaluated_cost,
+                ),
+                "carbon": (
+                    evaluated_carbon, -renewable_match,
+                    -carbon_free_match, evaluated_cost,
+                ),
+                "cost": (
+                    evaluated_cost, evaluated_carbon,
+                    -renewable_match, -carbon_free_match,
+                ),
+            }
+            key = (
+                (
+                    -utility,
+                    *energy_orders[policy.energy_priority],
+                    evaluated_energy,
+                    evaluated_curtailment,
+                    delay,
+                    signature,
+                )
+                if energy_profiles else (
+                    -utility, evaluated_carbon, evaluated_cost,
+                    delay, signature,
+                )
+            )
             if best_key is None or key < best_key:
                 best_key = key
                 best_assignments = list(selected)
+                best_dispatches = evaluated_dispatches
             return
 
         job, options = options_by_job[index]
@@ -330,22 +458,27 @@ def optimise_portfolio(jobs: list[PortfolioJob],
             if option is None:
                 recurse(index + 1, utility, cost, carbon, energy, delay)
                 continue
-            next_cost = cost + option.cost
-            next_carbon = carbon + option.carbon_kg
-            if (policy.max_total_cost is not None
-                    and next_cost > policy.max_total_cost + 1e-12):
-                continue
-            if (policy.max_total_carbon_kg is not None
-                    and next_carbon > policy.max_total_carbon_kg + 1e-12):
-                continue
-            slots = _occupied_slots(option)
+            next_cost = cost if energy_profiles else cost + option.cost
+            next_carbon = carbon if energy_profiles else carbon + option.carbon_kg
+            if not energy_profiles:
+                if (policy.max_total_cost is not None
+                        and next_cost > policy.max_total_cost + 1e-12):
+                    continue
+                if (policy.max_total_carbon_kg is not None
+                        and next_carbon > policy.max_total_carbon_kg + 1e-12):
+                    continue
+            site_key = (option.candidate.market, option.candidate.location)
+            energy_profile = energy_profiles.get(site_key)
+            slots = _occupied_slots(option, energy_profile)
             if any(
-                usage.get((market, location, timestamp), 0.0) + power
+                (energy_profile.facility_at(timestamp).base_load_kw
+                 if energy_profile is not None else 0.0)
+                + usage.get((market, location, timestamp), 0.0) + power
                 > capacity[(market, location)] + 1e-9
-                for market, location, timestamp, power in slots
+                for market, location, timestamp, power, _ in slots
             ):
                 continue
-            for market, location, timestamp, power in slots:
+            for market, location, timestamp, power, _ in slots:
                 key = market, location, timestamp
                 usage[key] = usage.get(key, 0.0) + power
             assignment = PortfolioAssignment(job, option)
@@ -356,12 +489,15 @@ def optimise_portfolio(jobs: list[PortfolioJob],
                 utility + job.utility,
                 next_cost,
                 next_carbon,
-                energy + option.facility_energy_kwh,
+                energy + sum(
+                    power * hours
+                    for _, _, _, power, hours in slots
+                ),
                 delay + option.delay_hours,
             )
             selected_by_job.pop(job.job_id)
             selected.pop()
-            for market, location, timestamp, power in slots:
+            for market, location, timestamp, power, _ in slots:
                 key = market, location, timestamp
                 remaining = usage[key] - power
                 if remaining <= 1e-12:
@@ -384,17 +520,178 @@ def optimise_portfolio(jobs: list[PortfolioJob],
         assignment.option.start_time,
         assignment.job.job_id,
     ))
+    if best_dispatches:
+        total_energy = sum(
+            dispatch.ai_energy_kwh for dispatch in best_dispatches
+        )
+        total_cost = sum(dispatch.ai_cost for dispatch in best_dispatches)
+        total_carbon = sum(
+            dispatch.ai_carbon_kg for dispatch in best_dispatches
+        )
+    else:
+        total_energy = sum(
+            item.option.facility_energy_kwh for item in best_assignments
+        )
+        total_cost = sum(item.option.cost for item in best_assignments)
+        total_carbon = sum(item.option.carbon_kg for item in best_assignments)
     return PortfolioResult(
         assignments=best_assignments,
         unscheduled_job_ids=sorted(set(job_ids) - assigned_ids),
         completed_utility=sum(item.job.utility for item in best_assignments),
         completed_work=completed_work,
-        total_energy_kwh=sum(item.option.facility_energy_kwh
-                             for item in best_assignments),
-        total_cost=sum(item.option.cost for item in best_assignments),
-        total_carbon_kg=sum(item.option.carbon_kg for item in best_assignments),
+        total_energy_kwh=total_energy,
+        total_cost=total_cost,
+        total_carbon_kg=total_carbon,
         total_delay_hours=sum(item.option.delay_hours for item in best_assignments),
         combinations_considered=considered,
         search_space_upper_bound=search_bound,
         rejected=rejected,
+        energy_dispatches=best_dispatches,
+    )
+
+
+def schedule_earliest(jobs: list[PortfolioJob],
+                      policy: PortfolioPolicy) -> PortfolioResult:
+    """Build a deterministic earliest-feasible operational counterfactual.
+
+    This baseline respects quality-qualified variants, workflow dependencies,
+    deadlines, fixed facility demand and power capacity. It deliberately does
+    not optimise energy outcomes or apply cost/carbon caps. Its purpose is to
+    answer what would have happened if the same admitted work were started as
+    soon as the declared constraints allowed.
+    """
+    if not jobs:
+        raise ValueError("portfolio needs at least one job")
+    job_ids = [job.job_id for job in jobs]
+    if len(job_ids) != len(set(job_ids)):
+        raise ValueError("portfolio job IDs must be unique")
+    ordered_jobs = _dependency_order(jobs)
+    capacity = {item.key: item.max_facility_power_kw for item in policy.capacities}
+    energy_profiles = {profile.key: profile for profile in policy.energy_profiles}
+    usage: dict[tuple[str, str, datetime], float] = {}
+    assignments: list[PortfolioAssignment] = []
+    by_job: dict[str, PortfolioAssignment] = {}
+    rejected: dict[str, str] = {}
+
+    for job in ordered_jobs:
+        options, option_rejections = _job_options(job)
+        missing_dependencies = [
+            dependency for dependency in job.depends_on
+            if dependency not in by_job
+        ]
+        if missing_dependencies:
+            reason = (
+                "dependency was not scheduled: "
+                + ", ".join(missing_dependencies)
+            )
+            rejected[job.job_id] = reason
+            if job.mandatory:
+                raise ValueError(
+                    f"mandatory job {job.job_id!r} is infeasible in earliest baseline: "
+                    f"{reason}"
+                )
+            continue
+        dependency_finish = (
+            max(by_job[dependency].option.finish_time
+                for dependency in job.depends_on)
+            if job.depends_on else None
+        )
+        options = sorted(options, key=lambda option: (
+            option.start_time, option.finish_time,
+            option.candidate.key, option.carbon_kg, option.cost,
+        ))
+        selected_option = None
+        for option in options:
+            if (dependency_finish is not None
+                    and option.start_time < dependency_finish):
+                continue
+            site_key = option.candidate.market, option.candidate.location
+            if site_key not in capacity:
+                raise ValueError(
+                    f"no facility capacity supplied for {site_key[0]}/{site_key[1]}"
+                )
+            profile = energy_profiles.get(site_key)
+            slots = _occupied_slots(option, profile)
+            if any(
+                (profile.facility_at(timestamp).base_load_kw if profile else 0.0)
+                + usage.get((market, location, timestamp), 0.0) + power
+                > capacity[(market, location)] + 1e-9
+                for market, location, timestamp, power, _ in slots
+            ):
+                continue
+            selected_option = option
+            for market, location, timestamp, power, _ in slots:
+                key = market, location, timestamp
+                usage[key] = usage.get(key, 0.0) + power
+            break
+        if selected_option is None:
+            reason = next(iter(option_rejections.values()),
+                          "no earliest capacity-feasible placement")
+            rejected[job.job_id] = reason
+            if job.mandatory:
+                raise ValueError(
+                    f"mandatory job {job.job_id!r} is infeasible in earliest baseline"
+                )
+            continue
+        assignment = PortfolioAssignment(job, selected_option)
+        assignments.append(assignment)
+        by_job[job.job_id] = assignment
+
+    dispatches: tuple[EnergyDispatchResult, ...] = ()
+    if energy_profiles:
+        loads_by_site: dict[
+            tuple[str, str], dict[str, dict[datetime, float]]
+        ] = {key: {} for key in energy_profiles}
+        for assignment in assignments:
+            option = assignment.option
+            site_key = option.candidate.market, option.candidate.location
+            loads = loads_by_site[site_key].setdefault(
+                assignment.job.job_id, {}
+            )
+            for _, _, timestamp, power, hours in _occupied_slots(
+                option, energy_profiles[site_key],
+            ):
+                loads[timestamp] = (
+                    loads.get(timestamp, 0.0)
+                    + power * hours / PERIOD_HOURS
+                )
+        dispatches = tuple(
+            dispatch_energy(profile, loads_by_site[site_key])
+            for site_key, profile in sorted(energy_profiles.items())
+        )
+        if not all(dispatch.feasible for dispatch in dispatches):
+            raise ValueError("earliest baseline has unmet physical energy demand")
+
+    assigned_ids = {assignment.job.job_id for assignment in assignments}
+    completed_work: dict[str, float] = {}
+    for assignment in assignments:
+        completed_work[assignment.job.work_unit] = (
+            completed_work.get(assignment.job.work_unit, 0.0)
+            + assignment.job.work_amount
+        )
+    if dispatches:
+        total_energy = sum(item.ai_energy_kwh for item in dispatches)
+        total_cost = sum(item.ai_cost for item in dispatches)
+        total_carbon = sum(item.ai_carbon_kg for item in dispatches)
+    else:
+        total_energy = sum(item.option.facility_energy_kwh for item in assignments)
+        total_cost = sum(item.option.cost for item in assignments)
+        total_carbon = sum(item.option.carbon_kg for item in assignments)
+    assignments.sort(key=lambda assignment: (
+        assignment.option.start_time, assignment.job.job_id,
+    ))
+    return PortfolioResult(
+        assignments=assignments,
+        unscheduled_job_ids=sorted(set(job_ids) - assigned_ids),
+        completed_utility=sum(item.job.utility for item in assignments),
+        completed_work=completed_work,
+        total_energy_kwh=total_energy,
+        total_cost=total_cost,
+        total_carbon_kg=total_carbon,
+        total_delay_hours=sum(item.option.delay_hours for item in assignments),
+        combinations_considered=1,
+        search_space_upper_bound=1,
+        exact=False,
+        rejected=rejected,
+        energy_dispatches=dispatches,
     )

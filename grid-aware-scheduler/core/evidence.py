@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import math
 import statistics
+import hashlib
+import json
+from dataclasses import asdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -27,6 +30,13 @@ WORK_UNITS = frozenset({
 })
 RUN_MODES = frozenset({"inference", "evaluation", "fine_tuning", "training"})
 THERMAL_STATES = frozenset({"nominal", "fair", "serious", "critical", "unknown"})
+ENERGY_METHODS = frozenset({
+    "external_meter", "apple_powermetrics", "nvidia_smi_integrated",
+})
+ENERGY_SCOPES = frozenset({
+    "device_input", "apple_soc_subsystems", "gpu_board",
+})
+ENERGY_PROVENANCE = frozenset({"MEASURED", "MEASURED_ESTIMATE"})
 
 
 def _required_text(name: str, value: str, maximum: int = 200) -> None:
@@ -108,6 +118,9 @@ class WorkloadObservation:
     thermal_end: str
     observed_at: datetime
     quality: QualityEvidence
+    energy_method: str
+    energy_scope: str
+    energy_provenance: str
     schema_version: str = SCHEMA_VERSION
     metadata_only: bool = True
 
@@ -126,6 +139,8 @@ class WorkloadObservation:
             _required_text(name, value)
         if self.run_mode not in RUN_MODES:
             raise ValueError(f"run_mode must be one of {sorted(RUN_MODES)}")
+        if not isinstance(self.quality, QualityEvidence):
+            raise ValueError("quality must be QualityEvidence")
         if self.work_unit not in WORK_UNITS:
             raise ValueError(f"work_unit must be one of {sorted(WORK_UNITS)}")
         _positive("work_amount", self.work_amount)
@@ -134,6 +149,9 @@ class WorkloadObservation:
         _positive("peak_memory_mb", self.peak_memory_mb, allow_zero=True)
         if self.thermal_start not in THERMAL_STATES or self.thermal_end not in THERMAL_STATES:
             raise ValueError(f"thermal states must be one of {sorted(THERMAL_STATES)}")
+        _validate_energy_method(
+            self.energy_method, self.energy_scope, self.energy_provenance,
+        )
         if not isinstance(self.observed_at, datetime) or self.observed_at.tzinfo is None:
             raise ValueError("observed_at must be a timezone-aware datetime")
         if self.schema_version != SCHEMA_VERSION:
@@ -168,6 +186,9 @@ class WorkloadObservation:
             self.work_unit,
             self.quality.metric,
             self.quality.fingerprint,
+            self.energy_method,
+            self.energy_scope,
+            self.energy_provenance,
         )
 
 
@@ -199,10 +220,40 @@ class EvidenceProfile:
     throughput_relative_mad: float
     energy_relative_mad: float
     profiled_at: datetime
+    energy_method: str
+    energy_scope: str
+    energy_provenance: str
     schema_version: str = SCHEMA_VERSION
     provenance: str = "MEASURED"
 
     def __post_init__(self) -> None:
+        for name, value in (
+            ("workload_class", self.workload_class),
+            ("model_id", self.model_id),
+            ("model_version", self.model_version),
+            ("precision", self.precision),
+            ("device_key", self.device_key),
+            ("compute_unit", self.compute_unit),
+            ("stack_fingerprint", self.stack_fingerprint),
+            ("shape_fingerprint", self.shape_fingerprint),
+            ("quality_metric", self.quality_metric),
+            ("quality_suite", self.quality_suite),
+            ("quality_suite_version", self.quality_suite_version),
+        ):
+            _required_text(name, value)
+        if self.run_mode not in RUN_MODES:
+            raise ValueError(f"run_mode must be one of {sorted(RUN_MODES)}")
+        if self.work_unit not in WORK_UNITS:
+            raise ValueError(f"work_unit must be one of {sorted(WORK_UNITS)}")
+        if not isinstance(self.quality_higher_is_better, bool):
+            raise ValueError("quality_higher_is_better must be boolean")
+        if (isinstance(self.quality_value, bool)
+                or not isinstance(self.quality_value, (int, float))
+                or not math.isfinite(self.quality_value)):
+            raise ValueError("quality_value must be finite")
+        if (not isinstance(self.sample_count, int)
+                or isinstance(self.sample_count, bool)):
+            raise ValueError("sample_count must be an integer")
         if self.sample_count < MIN_PROFILE_SAMPLES:
             raise ValueError("evidence profile has insufficient samples")
         for name, value in (
@@ -217,12 +268,60 @@ class EvidenceProfile:
             ("energy_relative_mad", self.energy_relative_mad),
         ):
             _positive(name, value, allow_zero=True)
-        if not 0 <= self.quality_score <= 1:
-            raise ValueError("quality_score must be between 0 and 1")
-        if self.profiled_at.tzinfo is None:
+        if (isinstance(self.quality_score, bool)
+                or not isinstance(self.quality_score, (int, float))
+                or not math.isfinite(self.quality_score)
+                or not 0 <= self.quality_score <= 1):
+            raise ValueError("quality_score must be finite and between 0 and 1")
+        if (not isinstance(self.profiled_at, datetime)
+                or self.profiled_at.tzinfo is None):
             raise ValueError("profiled_at must be timezone-aware")
+        _validate_energy_method(
+            self.energy_method, self.energy_scope, self.energy_provenance,
+        )
         if self.schema_version != SCHEMA_VERSION or self.provenance != "MEASURED":
             raise ValueError("evidence profile must use the measured v1 contract")
+
+    @property
+    def cross_device_comparable(self) -> bool:
+        return self.energy_method == "external_meter"
+
+    @property
+    def profile_id(self) -> str:
+        fingerprint = (
+            self.workload_class, self.run_mode, self.model_id,
+            self.model_version, self.precision, self.device_key,
+            self.compute_unit, self.stack_fingerprint,
+            self.shape_fingerprint, self.work_unit, self.quality_metric,
+            self.quality_suite, self.quality_suite_version,
+            self.quality_higher_is_better, self.energy_method,
+            self.energy_scope, self.energy_provenance,
+        )
+        digest = hashlib.sha256(
+            json.dumps(fingerprint, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:20]
+        return f"evidence-{digest}"
+
+
+def _validate_energy_method(method: str, scope: str, provenance: str) -> None:
+    if method not in ENERGY_METHODS:
+        raise ValueError(f"energy_method must be one of {sorted(ENERGY_METHODS)}")
+    if scope not in ENERGY_SCOPES:
+        raise ValueError(f"energy_scope must be one of {sorted(ENERGY_SCOPES)}")
+    if provenance not in ENERGY_PROVENANCE:
+        raise ValueError(
+            f"energy_provenance must be one of {sorted(ENERGY_PROVENANCE)}"
+        )
+    expected = {
+        "external_meter": ("device_input", "MEASURED"),
+        "apple_powermetrics": ("apple_soc_subsystems", "MEASURED_ESTIMATE"),
+        "nvidia_smi_integrated": ("gpu_board", "MEASURED"),
+    }[method]
+    if (scope, provenance) != expected:
+        raise ValueError(
+            f"{method} requires energy_scope={expected[0]!r} and "
+            f"energy_provenance={expected[1]!r}"
+        )
 
 
 def _relative_mad(values: list[float], centre: float) -> float:
@@ -274,6 +373,9 @@ def build_evidence_profile(observations: list[WorkloadObservation]) -> EvidenceP
         profiled_at=max(observation.observed_at for observation in observations).astimezone(
             timezone.utc
         ),
+        energy_method=first.energy_method,
+        energy_scope=first.energy_scope,
+        energy_provenance=first.energy_provenance,
     )
 
 
@@ -313,5 +415,60 @@ def planning_candidate_from_evidence(
             f"Normalised quality score {profile.quality_score:.3f}",
             f"Throughput robust variation +/-{profile.throughput_relative_mad:.1%}",
             f"Energy robust variation +/-{profile.energy_relative_mad:.1%}",
+            f"Energy method {profile.energy_method}; scope {profile.energy_scope}",
+            ("Cross-device energy comparison permitted"
+             if profile.cross_device_comparable
+             else "Energy is restricted to same-device configuration comparison"),
         ),
     )
+
+
+def observation_to_dict(observation: WorkloadObservation) -> dict:
+    row = asdict(observation)
+    row["observed_at"] = observation.observed_at.isoformat()
+    return row
+
+
+def observation_from_dict(row: dict) -> WorkloadObservation:
+    if not isinstance(row, dict):
+        raise ValueError("evidence observation must be an object")
+    values = dict(row)
+    quality_raw = values.get("quality")
+    if not isinstance(quality_raw, dict):
+        raise ValueError("evidence observation needs a quality object")
+    try:
+        values["quality"] = QualityEvidence(**quality_raw)
+        values["observed_at"] = datetime.fromisoformat(
+            str(values["observed_at"])
+        )
+        return WorkloadObservation(**values)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"invalid evidence observation: {exc}") from exc
+
+
+def profile_to_dict(profile: EvidenceProfile) -> dict:
+    row = asdict(profile)
+    row["profiled_at"] = profile.profiled_at.isoformat()
+    row["profile_id"] = profile.profile_id
+    row["cross_device_comparable"] = profile.cross_device_comparable
+    return row
+
+
+def profile_from_dict(row: dict) -> EvidenceProfile:
+    if not isinstance(row, dict):
+        raise ValueError("evidence profile must be an object")
+    values = {
+        key: value for key, value in row.items()
+        if key not in {"profile_id", "cross_device_comparable"}
+    }
+    try:
+        values["profiled_at"] = datetime.fromisoformat(
+            str(values["profiled_at"])
+        )
+        profile = EvidenceProfile(**values)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"invalid evidence profile: {exc}") from exc
+    supplied_id = row.get("profile_id")
+    if supplied_id is not None and supplied_id != profile.profile_id:
+        raise ValueError("evidence profile ID does not match its fingerprint")
+    return profile

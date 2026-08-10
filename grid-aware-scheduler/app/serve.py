@@ -34,10 +34,12 @@ from urllib.parse import parse_qs, urlsplit
 
 from app import api, dashboard, decisions, planner, simulator, workloads
 from app.markets import load_market, summarise_market
-from core import audit_store
+from core import audit_store, evidence_store
 from core.grid import Job
 from hardware.providers import LocalDetector
 from hardware.calibration import load_profiles
+from hardware import apple_benchmark
+from hardware.reference_language import catalogue_entry
 
 #: Market signals move on a half-hour boundary, so anything fresher than this
 #: is the same answer with extra network calls attached.
@@ -195,6 +197,18 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                     "refreshing": refreshing,
                 })
                 return
+            if path == "/api/v1/evidence/profiles":
+                try:
+                    self._send_json({
+                        "api_version": api.API_VERSION,
+                        "product_version": api.PRODUCT_VERSION,
+                        "summary": evidence_store.summary(),
+                        "profiles": evidence_store.list_profiles(),
+                        "collectors": [catalogue_entry()],
+                    })
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, 400)
+                return
             if path == "/api/v1/decisions":
                 try:
                     limit = int(query.get("limit", ["50"])[0])
@@ -291,7 +305,11 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
             score_prefix = "/api/v1/decisions/"
             is_score = path.startswith(score_prefix) and path.endswith("/score")
             is_portfolio = path == "/api/v1/portfolio"
-            if path != "/api/v1/plan" and not is_portfolio and not is_score:
+            is_evidence = path == "/api/v1/evidence/observations"
+            is_evidence_probe = path == "/api/v1/evidence/probe"
+            if (path != "/api/v1/plan" and not is_portfolio
+                    and not is_score and not is_evidence
+                    and not is_evidence_probe):
                 self.send_error(404, "Not found")
                 return
             if not self.headers.get("Content-Type", "").lower().startswith("application/json"):
@@ -307,6 +325,28 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                 return
             try:
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                if is_evidence_probe:
+                    if not isinstance(payload, dict):
+                        raise ValueError("probe request must be an object")
+                    result = apple_benchmark.run_mlx_probe(
+                        payload.get("matrix_size", 256),
+                        payload.get("iterations", 5),
+                    )
+                    self._send_json({
+                        "api_version": api.API_VERSION,
+                        "product_version": api.PRODUCT_VERSION,
+                        "probe": result,
+                    })
+                    return
+                if is_evidence:
+                    result = evidence_store.ingest_payload(payload)
+                    self._send_json({
+                        "api_version": api.API_VERSION,
+                        "product_version": api.PRODUCT_VERSION,
+                        "result": result,
+                        "summary": evidence_store.summary(),
+                    }, 200 if result["duplicate"] else 201)
+                    return
                 if is_score:
                     decision_id = path[len(score_prefix):-len("/score")].strip("/")
                     decision = audit_store.get_decision(decision_id)
@@ -330,7 +370,9 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                 market, location = self._market_location(query)
                 context = get_context(market, location, planning=True, span=2)
                 if is_portfolio:
-                    self._send_json(api.portfolio_response(payload, context))
+                    self._send_json(api.portfolio_response(
+                        payload, context, evidence_store.profile_map(),
+                    ))
                     return
                 response = api.plan_response(payload, context, load_profiles())
                 decision_id = audit_store.save_decision(

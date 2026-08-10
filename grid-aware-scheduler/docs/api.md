@@ -4,7 +4,7 @@ The local server exposes a small versioned JSON contract for integrations. It
 binds to `127.0.0.1`, does not enable cross-origin access and does not execute a
 workload. Version 1 is an auditable planning interface over the same canonical
 Python estimator and exact planner used by batch code. The current product
-version is `0.8.0`; the contract remains `v1`.
+version is `0.12.0`; the contract remains `v1`.
 
 ## Endpoints
 
@@ -14,6 +14,9 @@ version is `0.8.0`; the contract remains `v1`.
 | `GET` | `/api/v1/market?market=GB&location=london` | Current replay points and provenance |
 | `POST` | `/api/v1/plan?market=GB&location=london` | Estimate and optimise one workload |
 | `POST` | `/api/v1/portfolio?market=GB&location=london` | Schedule a quality-qualified workload queue against facility capacity |
+| `GET` | `/api/v1/evidence/profiles` | List governed measured profiles and registry counts |
+| `POST` | `/api/v1/evidence/observations` | Ingest one immutable metadata-only observation |
+| `POST` | `/api/v1/evidence/probe` | Run a short local MLX performance-only probe; never creates a profile |
 | `GET` | `/api/v1/decisions` | Recent persisted decisions |
 | `GET` | `/api/v1/decisions/{id}` | Exact request, response, signals and realised score |
 | `POST` | `/api/v1/decisions/{id}/score` | Score the fixed decision on realised points |
@@ -102,6 +105,33 @@ The API fails closed on an unknown model or device, invalid constraints,
 missing required signals, timestamp gaps and mixed currencies. Request bodies
 are limited to 64 KiB.
 
+## Measured evidence registry
+
+`POST /api/v1/evidence/observations` accepts one `workload-evidence-v1`
+observation. A run ID is immutable: replaying the identical record is
+idempotent, while changing a record under an existing ID is rejected. Serious
+or critical thermal runs are rejected. Three exact-fingerprint observations
+produce a stable profile ID in the ignored local SQLite evidence store.
+
+Every observation explicitly identifies its energy method, scope and
+provenance. Supported combinations are calibrated external device-input
+metering, Apple CPU/GPU/ANE subsystem estimates and integrated NVIDIA board
+power. Apple subsystem estimates cannot be ranked against another device.
+Energy Impact, duration and battery percentage are not accepted as watt-hours.
+
+A portfolio variant may provide `evidence_profile_id`. The server then derives
+model/version, precision, compute unit, hardware, runtime, IT power, memory,
+quality score and evaluation version from the stored profile. Conflicting
+client values are rejected. Assignment output includes profile ID, sample
+count, energy method/scope and robust throughput/energy variation.
+
+A job may instead set `auto_evidence_profiles: true`. The server ignores
+editable variants and creates candidates from every stored profile with the
+same workload class, run mode and work unit. It applies the quality floor
+before comparing hardware, model, precision, time and energy supply. Eligible
+variant counts are returned by job. Scores from different evaluation-suite
+versions are never ranked against one another.
+
 ## Portfolio request
 
 The AI Operations home at `/` submits one or more jobs. Every execution
@@ -113,6 +143,41 @@ rejected by default unless `require_measured_quality` is false.
 {
   "facility": {
     "max_power_kw": 200,
+    "site": {
+      "site_id": "facility-1",
+      "name": "AI facility",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "grid_connection_id": "operator-connection-1",
+      "time_zone": "Europe/London"
+    },
+    "base_load_kw": 60,
+    "pue_profile": 1.12,
+    "energy_priority": "renewable",
+    "energy_sources": [{
+      "source_id": "dedicated-wind",
+      "name": "Dedicated wind supply",
+      "kind": "wind",
+      "availability_kw": [80, 100, 120, 90],
+      "confidence": 0.9,
+      "cost_per_mwh": 12,
+      "carbon_g_per_kwh": 0,
+      "renewable": true,
+      "carbon_free": true,
+      "delivery_type": "dedicated_wire",
+      "latitude": 52.1,
+      "longitude": -0.4,
+      "grid_connection_id": "wind-export-1",
+      "delivery_loss_fraction": 0.025,
+      "dispatchable": false,
+      "provenance": "OPERATOR_FORECAST"
+    }],
+    "battery": {
+      "capacity_kwh": 100,
+      "max_charge_kw": 50,
+      "max_discharge_kw": 50,
+      "round_trip_efficiency": 0.9
+    },
     "max_total_cost": 500,
     "max_total_carbon_kg": 1000
   },
@@ -127,6 +192,8 @@ rejected by default unless `require_measured_quality` is false.
     "utility": 5,
     "minimum_quality": 0.85,
     "mandatory": true,
+    "checkpointable": false,
+    "checkpoint_count": 1,
     "require_measured_quality": true,
     "variants": [{
       "candidate_key": "speech-evaluation-17:device-a:int8",
@@ -150,14 +217,30 @@ rejected by default unless `require_measured_quality` is false.
 }
 ```
 
-The exact pilot objective first maximises completed operator utility, then
-minimises operational carbon, electricity cost and delay. Mandatory jobs may
-not be omitted. Unlike useful-work units are reported separately. Facility
-power is enforced in every occupied half-hour, and total cost/carbon caps are
+The exact pilot objective first maximises completed operator utility. With an
+energy profile, `energy_priority` then selects renewable-first,
+carbon-free-first, operational-carbon-first or electricity-cost-first
+lexicographic ranking. Mandatory jobs may not be omitted. Unlike useful-work
+units are reported separately. Facility power, base demand and time-varying
+PUE are enforced in every occupied half-hour, and total cost/carbon caps are
 hard constraints. Quality, memory and deadline feasibility are checked before
-grid ranking. The response reports assignments, model execution metadata,
-energy/carbon/cost per useful-work unit, unscheduled jobs, work completed by
-unit, aggregate energy/cost/carbon, search bound and exactness flag.
+energy ranking.
+
+The response reports assignment-level source energy, renewable and carbon-free
+match, grid and battery energy, interval dispatch, source accounting and an
+earliest-feasible run counterfactual. Explicitly checkpointable jobs can be
+expanded into two to 24 ordered chunks; non-checkpointable work remains
+continuous. See [`energy-dispatch.md`](energy-dispatch.md) for the physical
+claim boundary, dispatch order, full input schema and current limitations.
+
+`spatial_precision` reports the exact physical facility separately from the
+provider scope of price and carbon. Source accounting includes origin
+coordinates, grid-connection identity, great-circle distance, declared loss
+fraction and lost kWh. Coordinates do not upgrade a national, regional, zonal
+or balancing-area signal to site-level measurement.
+The same object distinguishes `decision_interval_minutes` from
+`provider_native_resolution_minutes`; US hourly observations are not
+misrepresented as independent half-hour measurements.
 
 The endpoint currently uses one selected market/location context per request.
 The core portfolio engine supports multiple facility candidates, but a future

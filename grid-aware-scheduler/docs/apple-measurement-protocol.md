@@ -118,7 +118,74 @@ baseline. Low price must not be described as low carbon.
 ## Installation boundary
 
 The optional Apple profiling dependencies are pinned in
-`requirements-apple.txt`. Model files and evaluation data are deliberately not
-installed automatically. The Mac currently has limited free storage, so the
-first downloaded model set must remain below 2 GiB unless storage is cleared
+`requirements-apple.txt` and are installed in the configured local
+environment. Model files and evaluation data are deliberately not installed
+automatically. The Mac currently has limited free storage, so the first
+downloaded model set must remain below 2 GiB unless storage is cleared
 deliberately.
+
+## Executable collector
+
+`python -m hardware.apple_benchmark probe` runs an MLX matrix workload to
+verify the local GPU execution path. It creates no scheduler evidence because
+it has neither task quality nor watt-hours.
+
+`python -m hardware.apple_benchmark record` wraps a real workload command. The
+command receives `AI_ENERGY_RESULT_PATH` and must write only `work_amount`,
+`quality_value` and `quality_score` to that JSON file. The collector measures
+duration and peak process-tree memory without retaining stdout, prompts or
+content. It requires exactly one valid energy source:
+
+- `--external-energy-wh` for a calibrated device-input meter interval;
+- `--prompt-external-energy` to run first, then enter the calibrated meter's
+  interval watt-hours after the metadata result has been validated;
+- `--powermetrics` for authorised CPU/GPU/ANE subsystem sampling.
+
+The latter invokes `sudo -n`, so it fails rather than displaying or capturing
+a password. The operator must establish authorisation outside the collector.
+Successful records enter the ignored local evidence database; three exact
+runs create a selectable Operations profile.
+
+## First executable reference workload
+
+`hardware.reference_language` is the first registry plug-in. It evaluates a
+pinned MLX model against ten public multiple-choice items and keeps generated
+text in memory only. It emits evaluated-sample count and measured accuracy.
+Samples, rather than generated tokens, are the fixed useful-work unit so a
+verbose model cannot improve its apparent efficiency by producing extra text.
+The dataset hash is part of both the suite version and shape
+fingerprint, so changing an item creates a different evidence group.
+
+The model must be pinned to its immutable 40-character repository commit. A
+mutable branch such as `main` is rejected. Prepare a metadata-only spec:
+
+```bash
+MODEL_REPO="organisation/model-name"
+MODEL_REVISION="0123456789abcdef0123456789abcdef01234567"
+
+python -m hardware.reference_language prepare \
+  --model "$MODEL_REPO" \
+  --revision "$MODEL_REVISION" \
+  --precision int4 \
+  --device-key apple-m2-8gb \
+  --output data/cache/language-mcq-spec.json
+```
+
+Then run through one authorised energy path. The manual external-meter path
+requests watt-hours only after inference finishes and the result contract has
+been validated:
+
+```bash
+python -m hardware.apple_benchmark record \
+  data/cache/language-mcq-spec.json \
+  --result-json data/cache/language-mcq-result.json \
+  --prompt-external-energy -- \
+  python -m hardware.reference_language run \
+  --model "$MODEL_REPO" \
+  --revision "$MODEL_REVISION"
+```
+
+Repeat under the same thermal and software conditions at least three times.
+Do not reuse one meter reading across runs. The Operations registry then shows
+the resulting profile and can compare it automatically with other compatible,
+quality-comparable governed profiles.

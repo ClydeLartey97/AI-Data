@@ -40,6 +40,7 @@ separate inputs and separate outputs.
 - device and software-stack fingerprints without host serial numbers;
 - useful-work amount and unit;
 - duration, IT energy, derived power, peak memory and thermal state;
+- energy measurement method, physical scope and separate provenance;
 - native task-quality value plus a suite-defined normalised score;
 - versioned evaluation suite and observation time.
 
@@ -55,6 +56,23 @@ device, compute-unit, stack, shape and evaluation fingerprint are required to
 form a measured profile. The profile uses robust medians and records relative
 median absolute deviation for throughput and energy. A fingerprint mismatch
 cannot inherit measured status.
+
+`core/evidence_store.py` persists these records locally and append-only. Run
+IDs are idempotent but cannot be rewritten. The Operations page reads stable
+profiles from the local API; selecting one causes the server to derive
+runtime, power, model, quality and memory instead of trusting editable browser
+inputs. The profile ID is a deterministic hash of the evidence fingerprint.
+
+Energy scope is part of that fingerprint. Apple `powermetrics` values are
+subsystem estimates suitable only for comparing configurations on the same
+device. Cross-device ranking requires calibrated device-input energy. The
+scheduler refuses to compare an Apple subsystem profile with another device
+or an unscoped manual candidate.
+
+The portfolio API can expand a job across every compatible governed profile.
+This is the measured model, hardware and precision routing path: profiles must
+match workload class, run mode and useful-work unit, pass the quality floor
+and use one comparable evaluation-suite version before energy placement.
 
 ## Portfolio objective
 

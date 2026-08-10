@@ -31,6 +31,13 @@ def _context() -> MarketContext:
 def local_server(monkeypatch, tmp_path):
     monkeypatch.setattr(serve, "load_market", lambda *args, **kwargs: _context())
     monkeypatch.setattr(serve.audit_store, "DB_PATH", tmp_path / "audit.sqlite")
+    monkeypatch.setattr(serve.evidence_store, "DB_PATH", tmp_path / "evidence.sqlite")
+    monkeypatch.setattr(serve.apple_benchmark, "run_mlx_probe", lambda *args: {
+        "operations_per_second": 123456,
+        "performance_provenance": "MEASURED",
+        "energy_provenance": "UNAVAILABLE",
+        "scheduler_profile_created": False,
+    })
     handler = serve.make_handler(
         2, Job("test", 1, 1, 4),
         serve._Cache(), serve._Cache(), serve._Cache(), serve._Cache(),
@@ -69,6 +76,18 @@ def test_health_endpoint_has_security_headers(local_server):
     assert payload["status"] == "ok"
     assert response.headers["X-Frame-Options"] == "DENY"
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+
+
+def test_mlx_probe_endpoint_is_performance_only(local_server):
+    request = urllib.request.Request(
+        f"{local_server}/api/v1/evidence/probe",
+        data=json.dumps({"matrix_size": 256, "iterations": 5}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    _, payload = _json(request)
+    assert payload["probe"]["operations_per_second"] == 123456
+    assert payload["probe"]["scheduler_profile_created"] is False
 
 
 def test_decision_journal_is_served_without_market_fetch(local_server):
@@ -188,3 +207,63 @@ def test_home_is_ai_operations_and_grid_is_specialist_view(local_server):
     assert "Operator control plane" in home
     assert "Grid Signal" in grid
     assert ">Sites &amp; Grid</a>" in grid
+
+
+def _evidence_payload(index: int) -> dict:
+    return {"observation": {
+        "run_id": f"server-evidence-{index}",
+        "workload_class": "language_generation",
+        "run_mode": "inference",
+        "model_id": "public-reference-model",
+        "model_version": "1.0",
+        "precision": "int4",
+        "device_key": "m2",
+        "compute_unit": "gpu",
+        "stack_fingerprint": "mlx-0.32.0",
+        "shape_fingerprint": "context-128_output-64_batch-1",
+        "work_amount": 64,
+        "work_unit": "tokens",
+        "duration_seconds": 10 + index,
+        "it_energy_wh": 0.05 + index * 0.001,
+        "peak_memory_mb": 900,
+        "thermal_start": "nominal",
+        "thermal_end": "nominal",
+        "observed_at": (
+            datetime(2026, 8, 10, tzinfo=timezone.utc)
+            + timedelta(minutes=index)
+        ).isoformat(),
+        "quality": {
+            "metric": "exact_match",
+            "value": 0.9,
+            "score": 0.9,
+            "higher_is_better": True,
+            "suite": "operator-eval",
+            "suite_version": "1.0",
+            "provenance": "MEASURED",
+        },
+        "energy_method": "apple_powermetrics",
+        "energy_scope": "apple_soc_subsystems",
+        "energy_provenance": "MEASURED_ESTIMATE",
+        "schema_version": "workload-evidence-v1",
+        "metadata_only": True,
+    }}
+
+
+def test_evidence_endpoints_build_an_immutable_measured_profile(local_server):
+    for index in range(3):
+        request = urllib.request.Request(
+            f"{local_server}/api/v1/evidence/observations",
+            data=json.dumps(_evidence_payload(index)).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        response, result = _json(request)
+        assert response.status == 201
+        assert result["result"]["fingerprint_sample_count"] == index + 1
+    _, registry = _json(f"{local_server}/api/v1/evidence/profiles")
+    assert registry["summary"]["observation_count"] == 3
+    assert registry["summary"]["profile_count"] == 1
+    assert registry["profiles"][0]["energy_method"] == "apple_powermetrics"
+    assert registry["profiles"][0]["cross_device_comparable"] is False
+    assert registry["collectors"][0]["benchmark_id"] == "mlx-language-mcq-v1"
+    assert registry["collectors"][0]["status"] == "runner_ready"

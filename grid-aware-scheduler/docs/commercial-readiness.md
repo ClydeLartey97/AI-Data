@@ -14,8 +14,9 @@ launch or defer a customer's workload.
 | Capability | Current evidence | Stage | Production exit criterion |
 |---|---|---|---|
 | Market data | Live GB national/regional, CAISO nodal and NYISO zonal price plus correctly scoped carbon | Pilot | Remaining US operators, contracted feeds, freshness SLOs, reconciliation and failover |
-| Placement algorithm | Exact single-job search plus bounded exact portfolio scheduling with half-hour facility capacity, hard total cost/carbon policies and deterministic tie-breaking | Pilot | Time-indexed production solver, published optimality gap and independent validation on customer traces |
-| Workload estimation | Architecture-aware estimates plus a modality-neutral measured evidence contract for language, vision, speech and training work units | Prototype | Apple-device benchmark collection, prediction intervals and drift monitoring |
+| Placement algorithm | Exact single-job and bounded portfolio search with dependencies, checkpoint chunks, half-hour facility/base-load capacity, time-varying PUE, source dispatch, hard policies and deterministic tie-breaking | Pilot | Time-indexed production solver, published optimality gap and independent validation on customer traces |
+| Energy supply | Source-agnostic physical dispatch for renewable, carbon-free, thermal, residual-grid and battery supply with confidence, exact site/source geometry, declared delivery losses and provenance | Prototype | Plant/facility telemetry, calibrated forecasts, network-validated losses, reserve/ramp constraints, contractual Scope 2 accounting and outturn reconciliation |
+| Workload estimation | Architecture-aware estimates, executable Apple collector, first pinned MLX language evaluation, append-only evidence registry and automatic governed-profile routing | Prototype | Broader reference workload corpus, integrated external-energy instrumentation, prediction intervals and drift monitoring |
 | Model routing | Quality gate before placement, with measured comparable evaluation scores required | Prototype | Customer-approved evaluation suites and governed model registry |
 | Decision evidence | Immutable request, response and signal snapshot plus realised-score attachment | Pilot | Tenant-scoped append-only store, retention policy and signed exports |
 | Operator product | AI Operations home plus linked Fleet Lab, Placement Lab, Sites & Grid terminal and Decision Journal | Pilot | Real workload/fleet ingestion, user research, accessibility audit and supported browser matrix |
@@ -31,12 +32,18 @@ launch or defer a customer's workload.
 - GB and CAISO location controls have different, explicitly labelled spatial
   precision. Carbon is not represented as nodal where the source is only
   balancing-area or regional.
+- Exact physical facility and source coordinates, connection identities,
+  geometric distance and declared delivery losses are retained without
+  changing the provider-defined scope of price or carbon signals.
 - A saved recommendation is reproducible from its inputs and decision-time
   signal snapshot.
 - The browser planner is a responsive preview. The persisted server decision
   is authoritative.
 - Historical replay demonstrates technical behaviour. It is not a forecast,
   a tariff quote, a contractual saving or evidence of future performance.
+- Contractual availability is kept separate from physical onsite,
+  dedicated-wire and grid delivery. The local generation shapes are estimated
+  scenario controls and are not represented as plant forecasts.
 
 ## Claims that are not supportable yet
 
@@ -46,6 +53,8 @@ launch or defer a customer's workload.
   `SPEC` or `ESTIMATED`.
 - Nodal carbon intensity in CAISO.
 - Carbon-credit generation.
+- 24/7 carbon-free-energy compliance, renewable additionality or verified
+  avoided emissions.
 - A specific company valuation.
 
 ## Route to a paid pilot

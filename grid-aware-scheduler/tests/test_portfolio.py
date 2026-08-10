@@ -5,9 +5,11 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from adapters.base_adapter import GridDataPoint
+from core.energy import (EnergySource, FacilityPoint, SiteEnergyProfile,
+                         SupplyPoint)
 from core.planner import PlanningCandidate
 from core.portfolio import (PortfolioJob, PortfolioPolicy, SiteCapacity,
-                            optimise_portfolio)
+                            optimise_portfolio, schedule_earliest)
 
 START = datetime(2026, 8, 10, tzinfo=timezone.utc)
 
@@ -177,3 +179,86 @@ def test_workflow_rejects_unknown_or_cyclic_stage_dependencies():
     )
     with pytest.raises(ValueError, match="contain a cycle"):
         optimise_portfolio([first, second], _policy())
+
+
+def test_portfolio_places_accelerator_stage_in_best_generation_surplus_window():
+    prices = [50] * 8
+    carbons = [500] * 8
+    candidate = PlanningCandidate(
+        key="gpu-stage",
+        hardware="GPU cluster",
+        market="GB",
+        location="London",
+        series=[
+            GridDataPoint(
+                START + timedelta(minutes=30 * index), carbon, price,
+            )
+            for index, (price, carbon) in enumerate(zip(prices, carbons))
+        ],
+        runtime_hours=2,
+        it_power_kw=50,
+        pue=1,
+        currency="GBP",
+        hardware_provenance="MEASURED",
+        grid_provenance="FORECAST",
+    )
+    job = PortfolioJob(
+        job_id="train",
+        candidates=(candidate,),
+        earliest_start=START,
+        deadline=START + timedelta(hours=4),
+        work_amount=1_000,
+        work_unit="training_examples",
+        utility=1,
+    )
+    stamps = [START + timedelta(minutes=30 * index) for index in range(8)]
+    solar = EnergySource(
+        "solar-plant", "Solar plant", "solar",
+        tuple(
+            SupplyPoint(stamp, 120 if 2 <= index <= 6 else 0, 0, 0, 1)
+            for index, stamp in enumerate(stamps)
+        ),
+        renewable=True,
+        carbon_free=True,
+        delivery_type="dedicated_wire",
+        provenance="FORECAST",
+    )
+    grid = EnergySource(
+        "grid", "Residual grid", "grid",
+        tuple(SupplyPoint(stamp, 200, 50, 500, 1) for stamp in stamps),
+        renewable=False,
+        delivery_type="grid",
+        dispatchable=True,
+        provenance="FORECAST",
+    )
+    energy = SiteEnergyProfile(
+        "GB", "London",
+        tuple(FacilityPoint(stamp, base_load_kw=60, pue=1) for stamp in stamps),
+        (solar, grid),
+    )
+    result = optimise_portfolio(
+        [job],
+        PortfolioPolicy(
+            capacities=(SiteCapacity("GB", "London", 150),),
+            energy_profiles=(energy,),
+        ),
+    )
+    assignment = result.assignments[0]
+    dispatch = result.energy_dispatches[0]
+    assert assignment.option.start_time == START + timedelta(hours=1)
+    assert dispatch.jobs["train"].renewable_match_pct == pytest.approx(100)
+    assert dispatch.jobs["train"].grid_kwh == 0
+    assert result.total_energy_kwh == pytest.approx(100)
+    assert result.total_carbon_kg == 0
+
+    baseline = schedule_earliest(
+        [job],
+        PortfolioPolicy(
+            capacities=(SiteCapacity("GB", "London", 150),),
+            energy_profiles=(energy,),
+        ),
+    )
+    assert baseline.assignments[0].option.start_time == START
+    assert baseline.energy_dispatches[0].jobs["train"].grid_kwh == pytest.approx(50)
+    assert baseline.energy_dispatches[0].jobs["train"].renewable_match_pct == pytest.approx(50)
+    assert baseline.exact is False

@@ -1,8 +1,9 @@
 # Grid-Aware Scheduler
 
-Decides **which accelerator runs which job, where, and when**, using measured
-electricity price and carbon-intensity data. Built for a data-centre operator
-with an hourly carbon target.
+Decides **which accelerator runs which AI workflow stage, where, when and on
+which physically available energy supply**, using workload evidence, facility
+constraints, generation forecasts, storage, electricity price and regional
+carbon data.
 
 **→ Read [`HANDOFF.md`](HANDOFF.md) first.** It is the single source of truth: full state, prior art, design decisions, measured findings, and everything still outstanding. Keep it current at the end of every session.
 
@@ -32,7 +33,10 @@ The local product has five linked operator surfaces:
 
 - `/` is the AI data-centre operations home. It begins with workload demand,
   quality/evidence state, SLA and memory readiness, facility capacity and an
-  exact queue recommendation.
+  exact queue recommendation. Its generation-aware layer models solar, wind,
+  hydro, nuclear, geothermal, biomass, thermal generation, residual grid,
+  time-varying PUE, base demand and storage, with exact operator-declared site
+  and source coordinates, delivery losses and an earliest-run comparison.
 - `/simulator` is the Fleet Lab. It estimates model runtime, memory, facility energy, cost and carbon
   across the hardware catalogue.
 - `/planner` is the Placement Lab. It searches every feasible hardware and half-hour placement against
@@ -50,6 +54,9 @@ Use `?market=GB&location=london` for regional GB carbon or
 `?market=CAISO&location=sp15` for California nodal pricing. CAISO also accepts
 an exact PNode through the location control. New York's eleven price zones use
 `?market=NYISO&location=nyc` or another NYISO zone from the selector.
+Facility coordinates and grid-connection identity are separate inputs. They
+identify the physical site precisely without falsely increasing the spatial
+resolution of the selected provider price or carbon feed.
 
 The planner can export a review link, an auditable plan JSON file and ranked
 alternatives as CSV. Local integrations can use the versioned endpoints at
@@ -89,9 +96,13 @@ separate. Exact-fingerprint empirical calibration is documented in
 [`docs/calibration.md`](docs/calibration.md).
 The modality-neutral evidence schema and multi-job capacity algorithm are
 documented in [`docs/workload-optimisation.md`](docs/workload-optimisation.md).
-The repeatable Mac/iPhone/iPad evidence boundary is documented in
-[`docs/apple-measurement-protocol.md`](docs/apple-measurement-protocol.md),
-with optional dependencies pinned in `requirements-apple.txt`.
+Physical generation, battery dispatch, checkpointable work, operator energy
+objectives and counterfactual reporting are documented in
+[`docs/energy-dispatch.md`](docs/energy-dispatch.md).
+The local governed workload evidence registry, Apple measurement collector and
+measured-profile scheduling boundary are documented in
+[`docs/apple-measurement-protocol.md`](docs/apple-measurement-protocol.md).
+Optional Apple profiling dependencies are pinned in `requirements-apple.txt`.
 
 The exact boundary between the current pilot foundation and a production
 control plane is documented in

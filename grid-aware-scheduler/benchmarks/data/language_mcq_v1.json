@@ -1,0 +1,52 @@
+[
+  {
+    "item_id": "arithmetic-01",
+    "prompt": "Return only the capital letter of the correct answer. What is 17 + 25? A) 32 B) 40 C) 42 D) 52",
+    "expected": "C"
+  },
+  {
+    "item_id": "sequence-01",
+    "prompt": "Return only the capital letter of the correct answer. Which number follows 3, 6, 12, 24? A) 30 B) 36 C) 42 D) 48",
+    "expected": "D"
+  },
+  {
+    "item_id": "dependency-01",
+    "prompt": "Return only the capital letter of the correct answer. Stage B depends on A and stage C depends on B. Which stage must run first? A) C B) A C) B D) Any stage",
+    "expected": "B"
+  },
+  {
+    "item_id": "energy-unit-01",
+    "prompt": "Return only the capital letter of the correct answer. How many watt-hours equal 2.5 kilowatt-hours? A) 25 B) 250 C) 2500 D) 25000",
+    "expected": "C"
+  },
+  {
+    "item_id": "logic-01",
+    "prompt": "Return only the capital letter of the correct answer. All scheduled jobs meet their deadlines. Job X is scheduled. What follows? A) X misses its deadline B) X meets its deadline C) X uses solar D) Nothing follows",
+    "expected": "B"
+  },
+  {
+    "item_id": "percentage-01",
+    "prompt": "Return only the capital letter of the correct answer. A workload uses 80 kWh and 60 kWh is renewable. What is its renewable match? A) 20% B) 60% C) 75% D) 80%",
+    "expected": "C"
+  },
+  {
+    "item_id": "comparison-01",
+    "prompt": "Return only the capital letter of the correct answer. Option A emits 4 kg and Option B emits 7 kg while both meet quality and deadline. Which has lower operational carbon? A) Option A B) Option B C) They are equal D) Cannot be determined",
+    "expected": "A"
+  },
+  {
+    "item_id": "time-01",
+    "prompt": "Return only the capital letter of the correct answer. A two-hour task starts at 13:30 without interruption. When does it finish? A) 14:30 B) 15:00 C) 15:30 D) 16:30",
+    "expected": "C"
+  },
+  {
+    "item_id": "capacity-01",
+    "prompt": "Return only the capital letter of the correct answer. A site limit is 200 kW, base demand is 60 kW and AI demand is 120 kW. Is the limit exceeded? A) Yes by 20 kW B) No, there is 20 kW headroom C) No, there is 80 kW headroom D) Yes by 80 kW",
+    "expected": "B"
+  },
+  {
+    "item_id": "confidence-01",
+    "prompt": "Return only the capital letter of the correct answer. A 100 kW generation forecast is derated by confidence 0.8. What firm power is used for planning? A) 20 kW B) 80 kW C) 100 kW D) 125 kW",
+    "expected": "B"
+  }
+]

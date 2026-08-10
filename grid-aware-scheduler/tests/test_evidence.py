@@ -44,6 +44,9 @@ def _observations(count: int = 3) -> list[WorkloadObservation]:
             thermal_end="fair",
             observed_at=start + timedelta(hours=index),
             quality=_quality(),
+            energy_method="apple_powermetrics",
+            energy_scope="apple_soc_subsystems",
+            energy_provenance="MEASURED_ESTIMATE",
         )
         for index in range(count)
     ]
@@ -106,6 +109,8 @@ def test_profile_uses_robust_measured_work_and_energy_rates():
     assert profile.peak_memory_mb == 3_140
     assert profile.quality_score == pytest.approx(0.92)
     assert profile.provenance == "MEASURED"
+    assert profile.cross_device_comparable is False
+    assert profile.profile_id.startswith("evidence-")
 
 
 def test_measured_profile_becomes_grid_aware_planning_candidate():
@@ -125,3 +130,19 @@ def test_measured_profile_becomes_grid_aware_planning_candidate():
     assert candidate.facility_energy_kwh == pytest.approx(0.00121)
     assert candidate.hardware_provenance == "MEASURED"
     assert any("512 tokens" in note for note in candidate.notes)
+
+
+def test_energy_method_scope_cannot_be_promoted_or_mixed():
+    observation = _observations(1)[0]
+    with pytest.raises(ValueError, match="requires energy_scope"):
+        WorkloadObservation(**{
+            **observation.__dict__,
+            "energy_scope": "device_input",
+        })
+    external = WorkloadObservation(**{
+        **observation.__dict__,
+        "energy_method": "external_meter",
+        "energy_scope": "device_input",
+        "energy_provenance": "MEASURED",
+    })
+    assert external.energy_method == "external_meter"
