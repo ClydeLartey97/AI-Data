@@ -181,10 +181,17 @@ _MARKUP = """
     </span>
     <span class="ch-grp ch-right">
       <button type="button" class="ch-btn" data-act="zone">UTC</button>
+      <button type="button" class="ch-btn on" data-act="grid" aria-pressed="true">Grid</button>
+      <button type="button" class="ch-btn on" data-act="cross" aria-pressed="true">Crosshair</button>
+      <button type="button" class="ch-btn" data-act="y-in" title="Zoom Y axis in">Y +</button>
+      <button type="button" class="ch-btn" data-act="y-out" title="Zoom Y axis out">Y −</button>
       <button type="button" class="ch-btn" data-act="reset">Reset</button>
       <button type="button" class="ch-btn" data-act="csv">CSV</button>
+      <button type="button" class="ch-btn" data-act="expand" aria-expanded="false">Full screen</button>
     </span>
   </div>
+
+  <button type="button" class="ch-full-close" aria-label="Close full-screen chart">Close</button>
 
   <div class="ch-plot">
     <svg viewBox="0 0 1000 __H__" preserveAspectRatio="none" role="img"
@@ -201,7 +208,14 @@ _MARKUP = """
       <g class="ch-cross" hidden>
         <line class="ch-vline"/><line class="ch-hline"/>
         <circle class="ch-dot2" r="4"/>
+        <rect class="ch-ybadge" width="82" height="20" rx="5"/>
+        <text class="ch-badge-text ch-ybadge-text" text-anchor="middle"></text>
+        <rect class="ch-xbadge" width="138" height="20" rx="5"/>
+        <text class="ch-badge-text ch-xbadge-text" text-anchor="middle"></text>
       </g>
+      <g class="ch-latest"><line class="ch-latest-line"/><rect class="ch-latest-badge"
+        width="82" height="20" rx="5"/><text class="ch-badge-text ch-latest-text"
+        text-anchor="middle"></text></g>
       <g class="ch-yaxis"></g>
       <g class="ch-axis"></g>
     </svg>
@@ -211,7 +225,7 @@ _MARKUP = """
       <text class="ch-sublabel" x="4" y="11">spread (high − low)</text>
     </svg>
   </div>
-  <p class="ch-hint">Scroll to zoom · drag to pan · shift-drag to select · double-click to reset</p>
+  <p class="ch-hint">Wheel zooms X · Shift-wheel zooms Y · drag pans X · Alt-drag pans Y · shift-drag selects · double-click resets</p>
 </figure>"""
 
 
@@ -224,7 +238,7 @@ _JS = r"""
   var svg = root.querySelector("svg");
   var sub = root.querySelector(".ch-sub");
   var q = function (s) { return root.querySelector(s); };
-  var W = 1000, H = CFG.height, PAD_T = 8, PAD_B = 26, PAD_L = 52;
+  var W = 1000, H = CFG.height, PAD_T = 8, PAD_B = 30, PAD_L = 60;
   var SUB_H = __HSUB__;
 
   var LAST = P.length ? P[P.length - 1].t : 0;
@@ -234,7 +248,8 @@ _JS = r"""
   // candle interval. Switching from 1h to 6h candles keeps you looking at the
   // same stretch of time, which is what every trading platform does.
   var S = { range: CFG.start, interval: 0, type: "area", win: null, utc: true,
-            ma: false, ema: false, pct: false, spread: false };
+            ma: false, ema: false, pct: false, spread: false, grid: true,
+            cross: true, yZoom: 1, yOffset: 0 };
   var view = null;
 
   var fmt = new Intl.NumberFormat("en-GB", {
@@ -311,13 +326,16 @@ _JS = r"""
 
     var lo = Infinity, hi = -Infinity;
     for (var i = 0; i < n; i++) { if (pts[i].l < lo) lo = pts[i].l; if (pts[i].h > hi) hi = pts[i].h; }
-    var pad = (hi - lo || 1) * 0.10, yLo = lo - pad, yHi = hi + pad;
+    var pad = (hi - lo || 1) * 0.10, baseLo = lo - pad, baseHi = hi + pad;
+    var baseSpan = baseHi - baseLo, baseMid = (baseLo + baseHi) / 2;
+    var ySpan = baseSpan * S.yZoom, yMid = baseMid + S.yOffset * baseSpan;
+    var yLo = yMid - ySpan / 2, yHi = yMid + ySpan / 2;
 
     function X(i) { return n < 2 ? (PAD_L + W) / 2 : PAD_L + (i / (n - 1)) * (W - PAD_L); }
     function Y(v) { return PAD_T + (H - PAD_T - PAD_B) * (1 - (v - yLo) / (yHi - yLo)); }
     var bw = Math.max(1.2, (W - PAD_L) / Math.max(n, 1) * 0.62);
 
-    var step = niceStep(yHi - yLo, 5), g = "", yt = "";
+    var step = niceStep(yHi - yLo, 8), g = "", yt = "";
     for (var v = Math.ceil(yLo / step) * step; v <= yHi; v += step) {
       var yy = Y(v); if (yy < PAD_T || yy > H - PAD_B) continue;
       g += '<line class="ch-gl" x1="' + PAD_L + '" y1="' + yy.toFixed(1) +
@@ -325,7 +343,7 @@ _JS = r"""
       yt += '<text class="ch-ytick" x="' + (PAD_L - 6) + '" y="' + (yy + 3.5).toFixed(1) +
             '" text-anchor="end">' + num(v) + "</text>";
     }
-    q(".ch-grid").innerHTML = g; q(".ch-yaxis").innerHTML = yt;
+    q(".ch-grid").innerHTML = S.grid ? g : ""; q(".ch-yaxis").innerHTML = yt;
 
     var marks = "", env = "";
     if (S.type === "candle" || S.type === "bar") {
@@ -402,17 +420,20 @@ _JS = r"""
     } else ng.hidden = true;
 
     var fine = (t1 - t0) <= 3 * 86400000;
-    var want = Math.min(7, n), ax = "";
+    var want = Math.min(9, n), ax = "", xg = "";
     for (var m = 0; m < want; m++) {
       var idx = Math.round(m * (n - 1) / Math.max(want - 1, 1));
       var o = fine ? { hour: "2-digit", minute: "2-digit", hour12: false }
                    : ((t1 - t0) > 120 * 86400000 ? { month: "short", year: "numeric" }
                                                  : { day: "numeric", month: "short" });
       if (S.utc) o.timeZone = "UTC";
+      xg += '<line class="ch-gl ch-xgl" x1="' + X(idx).toFixed(1) + '" y1="' + PAD_T +
+             '" x2="' + X(idx).toFixed(1) + '" y2="' + (H - PAD_B) + '"/>';
       ax += '<text class="ch-tick" x="' + X(idx).toFixed(1) + '" y="' + (H - 8) +
             '" text-anchor="' + (m === 0 ? "start" : m === want - 1 ? "end" : "middle") + '">' +
             new Intl.DateTimeFormat("en-GB", o).format(new Date(pts[idx].t)) + "</text>";
     }
+    if (S.grid) q(".ch-grid").innerHTML += xg;
     q(".ch-axis").innerHTML = ax;
 
     sub.hidden = !S.spread;
@@ -439,7 +460,17 @@ _JS = r"""
                   iv >= 3600000 ? (iv / 3600000) + "h" : (iv / 60000) + "m";
     q("[data-iv]").textContent = ivLabel;
 
-    view = { pts: pts, X: X, Y: Y, n: n, fine: fine, win: win, iv: iv };
+    var latest = pts[n - 1], latestY = Math.max(PAD_T, Math.min(H - PAD_B, Y(latest.m)));
+    var latestGroup = q(".ch-latest"), latestLine = q(".ch-latest-line");
+    latestLine.setAttribute("x1", PAD_L); latestLine.setAttribute("x2", W);
+    latestLine.setAttribute("y1", latestY); latestLine.setAttribute("y2", latestY);
+    var latestBadge = q(".ch-latest-badge"), latestText = q(".ch-latest-text");
+    latestBadge.setAttribute("x", W - 84); latestBadge.setAttribute("y", latestY - 10);
+    latestText.setAttribute("x", W - 43); latestText.setAttribute("y", latestY + 4);
+    latestText.textContent = num(latest.m); latestGroup.hidden = false;
+
+    view = { pts: pts, X: X, Y: Y, n: n, fine: fine, win: win, iv: iv,
+      yLo: yLo, yHi: yHi, baseLo: baseLo, baseHi: baseHi };
     readout(pts[n - 1]);
   }
 
@@ -459,8 +490,32 @@ _JS = r"""
     return best;
   }
 
+  function zoomY(factor, fraction) {
+    if (!view) return;
+    fraction = Math.max(0, Math.min(1, fraction === undefined ? 0.5 : fraction));
+    var baseSpan = view.baseHi - view.baseLo, oldSpan = view.yHi - view.yLo;
+    var nextSpan = Math.max(baseSpan * 0.04, Math.min(baseSpan * 20, oldSpan * factor));
+    var actual = nextSpan / oldSpan;
+    var anchor = view.yHi - oldSpan * fraction, oldMid = (view.yLo + view.yHi) / 2;
+    var nextMid = anchor + (oldMid - anchor) * actual;
+    S.yZoom = nextSpan / baseSpan;
+    S.yOffset = (nextMid - (view.baseLo + view.baseHi) / 2) / baseSpan;
+    draw();
+  }
+
+  function panY(fraction) {
+    if (!view) return;
+    S.yOffset += fraction * S.yZoom;
+    draw();
+  }
+
   svg.addEventListener("wheel", function (e) {
     e.preventDefault();
+    if (e.shiftKey) {
+      var yr = svg.getBoundingClientRect();
+      zoomY(Math.exp(e.deltaY * 0.0014), (e.clientY - yr.top) / yr.height);
+      return;
+    }
     var win = windowMs(), span = win[1] - win[0];
     var r = svg.getBoundingClientRect();
     var frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
@@ -475,11 +530,12 @@ _JS = r"""
 
   var drag = null;
   svg.addEventListener("pointerdown", function (e) {
-    drag = { x: e.clientX, shift: e.shiftKey, win: windowMs(), moved: false };
+    drag = { x: e.clientX, y: e.clientY, shift: e.shiftKey, alt: e.altKey,
+      win: windowMs(), moved: false, yOffset: S.yOffset, yZoom: S.yZoom };
     svg.setPointerCapture(e.pointerId);
   });
   svg.addEventListener("pointermove", function (e) {
-    if (view) {
+    if (view && S.cross) {
       var i = idxAt(e.clientX), p = view.pts[i];
       q(".ch-cross").hidden = false;
       var x = view.X(i), y = view.Y(p.m);
@@ -489,6 +545,16 @@ _JS = r"""
       hl.setAttribute("x1", PAD_L); hl.setAttribute("x2", W);
       hl.setAttribute("y1", y); hl.setAttribute("y2", y);
       q(".ch-dot2").setAttribute("cx", x); q(".ch-dot2").setAttribute("cy", y);
+      var yBadge = q(".ch-ybadge"), yBadgeText = q(".ch-ybadge-text");
+      var badgeY = Math.max(PAD_T, Math.min(H - PAD_B - 20, y - 10));
+      yBadge.setAttribute("x", W - 84); yBadge.setAttribute("y", badgeY);
+      yBadgeText.setAttribute("x", W - 43); yBadgeText.setAttribute("y", badgeY + 14);
+      yBadgeText.textContent = num(p.m);
+      var xBadge = q(".ch-xbadge"), xBadgeText = q(".ch-xbadge-text");
+      var badgeX = Math.max(PAD_L, Math.min(W - 138, x - 69));
+      xBadge.setAttribute("x", badgeX); xBadge.setAttribute("y", H - PAD_B);
+      xBadgeText.setAttribute("x", badgeX + 69); xBadgeText.setAttribute("y", H - PAD_B + 14);
+      xBadgeText.textContent = when(p.t, true);
       readout(p);
     }
     if (!drag) return;
@@ -500,6 +566,9 @@ _JS = r"""
       sel.setAttribute("x", (x1 / r.width * W).toFixed(1));
       sel.setAttribute("width", ((x2 - x1) / r.width * W).toFixed(1));
       sel.setAttribute("y", PAD_T); sel.setAttribute("height", H - PAD_T - PAD_B);
+    } else if (drag.alt) {
+      S.yOffset = drag.yOffset + (e.clientY - drag.y) / r.height * drag.yZoom;
+      draw();
     } else {
       var span = drag.win[1] - drag.win[0];
       var shift = -(e.clientX - drag.x) / r.width * span;
@@ -523,15 +592,21 @@ _JS = r"""
   svg.addEventListener("pointerleave", function () {
     q(".ch-cross").hidden = true; if (view) readout(view.pts[view.n - 1]);
   });
-  svg.addEventListener("dblclick", function () { S.win = null; draw(); });
+  svg.addEventListener("dblclick", function () {
+    S.win = null; S.yZoom = 1; S.yOffset = 0; draw();
+  });
 
   root.addEventListener("keydown", function (e) {
     var win = windowMs(), span = win[1] - win[0], stp = span * 0.15;
     if (e.key === "ArrowLeft") { S.win = [Math.max(FIRST, win[0] - stp), win[1] - stp]; }
     else if (e.key === "ArrowRight") { S.win = [win[0] + stp, Math.min(LAST, win[1] + stp)]; }
+    else if (e.key === "ArrowUp") { e.preventDefault(); panY(0.08); return; }
+    else if (e.key === "ArrowDown") { e.preventDefault(); panY(-0.08); return; }
+    else if ((e.key === "+" || e.key === "=") && e.shiftKey) { e.preventDefault(); zoomY(0.75); return; }
+    else if (e.key === "-" && e.shiftKey) { e.preventDefault(); zoomY(1 / 0.75); return; }
     else if (e.key === "+" || e.key === "=") { S.win = [win[0] + stp, win[1] - stp]; }
     else if (e.key === "-") { S.win = [Math.max(FIRST, win[0] - stp), Math.min(LAST, win[1] + stp)]; }
-    else if (e.key.toLowerCase() === "r") { S.win = null; }
+    else if (e.key.toLowerCase() === "r") { S.win = null; S.yZoom = 1; S.yOffset = 0; }
     else return;
     e.preventDefault(); draw();
   });
@@ -545,7 +620,8 @@ _JS = r"""
     root.querySelectorAll(sel + " button").forEach(function (o) { o.classList.remove("on"); });
     b.classList.add("on");
   }
-  seg(".ch-ranges", "r", function (v, b) { exclusive(".ch-ranges", b); S.range = v; S.win = null; draw(); });
+  seg(".ch-ranges", "r", function (v, b) { exclusive(".ch-ranges", b); S.range = v;
+    S.win = null; S.yZoom = 1; S.yOffset = 0; draw(); });
   seg(".ch-intervals", "iv", function (v, b) { exclusive(".ch-intervals", b); S.interval = +v; draw(); });
   seg(".ch-types", "type", function (v, b) { exclusive(".ch-types", b); S.type = v; draw(); });
   seg(".ch-overlays", "ov", function (v, b) { S[v] = !S[v]; b.classList.toggle("on", S[v]); draw(); });
@@ -553,8 +629,14 @@ _JS = r"""
   root.querySelectorAll(".ch-btn").forEach(function (b) {
     b.addEventListener("click", function () {
       var a = b.dataset.act;
-      if (a === "reset") { S.win = null; draw(); }
+      if (a === "reset") { S.win = null; S.yZoom = 1; S.yOffset = 0; draw(); }
       else if (a === "zone") { S.utc = !S.utc; b.textContent = S.utc ? "UTC" : "Local"; draw(); }
+      else if (a === "grid") { S.grid = !S.grid; b.classList.toggle("on", S.grid);
+        b.setAttribute("aria-pressed", String(S.grid)); draw(); }
+      else if (a === "cross") { S.cross = !S.cross; b.classList.toggle("on", S.cross);
+        b.setAttribute("aria-pressed", String(S.cross)); if (!S.cross) q(".ch-cross").hidden = true; }
+      else if (a === "y-in") zoomY(0.75);
+      else if (a === "y-out") zoomY(1 / 0.75);
       else if (a === "csv") {
         var rows = [["interval_start", "open", "high", "low", "close", "mean", "samples"]];
         view.pts.forEach(function (p) {
@@ -565,7 +647,38 @@ _JS = r"""
         el.download = CFG.key + "_" + S.range + ".csv"; el.click();
         URL.revokeObjectURL(el.href);
       }
+      else if (a === "expand") {
+        var expanded = !root.classList.contains("ch-full");
+        root.classList.toggle("ch-full", expanded);
+        document.body.classList.toggle("ch-lock", expanded);
+        if (expanded) { root.setAttribute("role", "dialog"); root.setAttribute("aria-modal", "true"); }
+        else { root.removeAttribute("role"); root.removeAttribute("aria-modal"); }
+        b.setAttribute("aria-expanded", String(expanded));
+        b.textContent = expanded ? "Exit full screen" : "Full screen";
+        if (expanded) root.querySelector(".ch-full-close").focus(); else root.focus();
+        requestAnimationFrame(draw);
+      }
     });
+  });
+
+  root.querySelector(".ch-full-close").addEventListener("click", function () {
+    var button = root.querySelector('[data-act="expand"]');
+    root.classList.remove("ch-full"); document.body.classList.remove("ch-lock");
+    root.removeAttribute("role"); root.removeAttribute("aria-modal");
+    button.setAttribute("aria-expanded", "false"); button.textContent = "Full screen";
+    button.focus(); requestAnimationFrame(draw);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && root.classList.contains("ch-full"))
+      root.querySelector(".ch-full-close").click();
+    if (e.key === "Tab" && root.classList.contains("ch-full")) {
+      var items = Array.from(root.querySelectorAll('button:not([disabled]),[tabindex]:not([tabindex="-1"])'))
+        .filter(function (item) { return item.offsetParent !== null; });
+      if (!items.length) return;
+      var first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
   });
 
   draw();
@@ -611,6 +724,8 @@ CHART_CSS = """
   border-radius: 980px; cursor: pointer; border: 1px solid var(--sep);
   background: transparent; color: var(--text-2); }
 .ch-btn:hover { color: var(--text); border-color: var(--text-3); }
+.ch-btn.on { color: var(--series); border-color: color-mix(in srgb,var(--series) 50%,var(--sep));
+  background: color-mix(in srgb,var(--series) 8%,transparent); }
 
 .ch-plot { position: relative; }
 .ch svg { width: 100%; height: auto; display: block; overflow: visible; cursor: crosshair;
@@ -634,7 +749,14 @@ CHART_CSS = """
   font-variant-numeric: tabular-nums; }
 .ch-vline, .ch-hline { stroke: var(--text-3); stroke-width: 1; stroke-dasharray: 3 3;
   vector-effect: non-scaling-stroke; }
+.ch-xgl { opacity: .58; }
 .ch-dot2 { fill: var(--series); stroke: var(--card); stroke-width: 2; }
+.ch-ybadge, .ch-xbadge { fill: var(--text); opacity: .94; }
+.ch-badge-text { fill: var(--bg); font-size: 10px; font-weight: 700; font-family: inherit;
+  font-variant-numeric: tabular-nums; }
+.ch-latest-line { stroke: var(--series); stroke-width: 1; stroke-dasharray: 5 4;
+  opacity: .72; vector-effect: non-scaling-stroke; }
+.ch-latest-badge { fill: var(--series); opacity: .92; }
 .ch-span { fill: var(--series); opacity: .13; }
 .ch-sel { fill: var(--series); opacity: .15; }
 .ch-nowline { stroke: var(--text-2); stroke-width: 1; stroke-dasharray: 3 3;
@@ -645,6 +767,22 @@ CHART_CSS = """
   background: color-mix(in srgb, var(--series) 14%, transparent); color: var(--series);
   font-variant-numeric: tabular-nums; }
 .ch-hint { margin: 8px 0 0; font-size: 11px; color: var(--text-3); }
-svg [hidden] { display: none; }
+.ch-full-close { display: none; position: absolute; top: 18px; right: 22px; z-index: 11002;
+  font: 600 12px inherit; color: var(--text); background: var(--card);
+  border: 1px solid var(--sep); border-radius: 999px; padding: 7px 12px; cursor: pointer; }
+.ch-full { position: fixed; inset: 12px; z-index: 11000; margin: 0; padding: 24px 28px 18px;
+  border-radius: 18px; background: var(--card); box-shadow: 0 28px 90px rgba(0,0,0,.5);
+  display: flex; flex-direction: column; overflow: auto; }
+.ch-full .ch-head { padding-right: 90px; }
+.ch-full .ch-plot { flex: 1; min-height: 420px; display: flex; flex-direction: column; }
+.ch-full .ch-plot>svg:first-child { flex: 1; min-height: 380px; height: 100%; }
+.ch-full .ch-full-close { display: block; }
+.ch-full [data-act="expand"] { display: none; }
+body.ch-lock { overflow: hidden; }
+body.ch-lock::before { content: ""; position: fixed; inset: 0; z-index: 10900;
+  background: rgba(0,0,0,.58); backdrop-filter: blur(3px); }
+.ch svg[hidden], .ch [hidden] { display: none; }
 @media (max-width: 900px) { .ch-stats, .ch-ohlc { display: none; } }
+@media (max-width: 640px) { .ch-full { inset: 0; border-radius: 0; padding: 54px 12px 12px; }
+  .ch-full .ch-full-close { top: 12px; right: 12px; } }
 """

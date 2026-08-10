@@ -25,6 +25,7 @@ env/
 # --- data ------------------------------------------------------------------
 # cached market data pulled from live APIs — re-fetchable, don't track
 **/data/cache/
+**/data/calibration/profiles.json
 *.sqlite
 *.db
 *.parquet
@@ -37,3 +38,6 @@ env/
 
 # generated dashboard output + screenshots — rebuilt by `python -m app.dashboard`
 **/app/build/
+
+# local application process state and logs
+grid-aware-scheduler/.runtime/

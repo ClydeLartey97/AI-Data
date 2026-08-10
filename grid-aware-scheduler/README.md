@@ -1,10 +1,24 @@
 # Grid-Aware Scheduler
 
-Decides **which accelerator runs which job, and when**, using live electricity price and carbon-intensity data. Built for a data-centre operator with a carbon-neutrality target.
+Decides **which accelerator runs which job, where, and when**, using measured
+electricity price and carbon-intensity data. Built for a data-centre operator
+with an hourly carbon target.
 
 **→ Read [`HANDOFF.md`](HANDOFF.md) first.** It is the single source of truth: full state, prior art, design decisions, measured findings, and everything still outstanding. Keep it current at the end of every session.
 
 ## Run it
+
+On the configured Mac, open **Grid-Aware Scheduler.app** from the Desktop. The
+launcher reuses a healthy local process or starts one, waits for its health
+check, and opens the product. It does not expose the server to the network.
+
+To install or rebuild that launcher once:
+
+```bash
+~/venvs/national-grid/bin/python scripts/install_launcher.py
+```
+
+The equivalent terminal command is:
 
 ```bash
 python3 -m venv ~/venvs/national-grid
@@ -14,7 +28,33 @@ python3 -m venv ~/venvs/national-grid
 ~/venvs/national-grid/bin/python -m app.serve                  # http://localhost:8765
 ```
 
-`/` is the grid terminal, `/simulator` the model-on-hardware simulator. Everything is local — nothing is hosted, and the server binds to loopback only.
+The local product has five linked operator surfaces:
+
+- `/` is the AI data-centre operations home. It begins with workload demand,
+  quality/evidence state, SLA and memory readiness, facility capacity and an
+  exact queue recommendation.
+- `/simulator` is the Fleet Lab. It estimates model runtime, memory, facility energy, cost and carbon
+  across the hardware catalogue.
+- `/planner` is the Placement Lab. It searches every feasible hardware and half-hour placement against
+  explicit cost, carbon and delay weights.
+- `/grid` is the detailed Sites & Grid terminal for regional electricity price,
+  carbon and interactive market analytics.
+- `/decisions` is the immutable decision journal, including forecast versus
+  realised evidence and exact JSON export.
+
+Every page has a persistent Light/Dark switch in the top-right. The preference
+is shared locally across pages and survives reopening the product.
+
+Everything is local. Nothing is hosted, and the server binds to loopback only.
+Use `?market=GB&location=london` for regional GB carbon or
+`?market=CAISO&location=sp15` for California nodal pricing. CAISO also accepts
+an exact PNode through the location control. New York's eleven price zones use
+`?market=NYISO&location=nyc` or another NYISO zone from the selector.
+
+The planner can export a review link, an auditable plan JSON file and ranked
+alternatives as CSV. Local integrations can use the versioned endpoints at
+`/api/v1/health`, `/api/v1/market`, `/api/v1/plan` and `/api/v1/portfolio`; see
+[`docs/api.md`](docs/api.md).
 
 ## What it has measured
 
@@ -33,12 +73,29 @@ That last row is the load-bearing one: an operator optimising purely on price mi
 ## Layout
 
 ```
-adapters/   one file per market — GB national, GB regional, worldwide weather
-core/       market-agnostic: scheduling, workload maths, analytics, cache
+adapters/   GB national/regional, CAISO nodal and NYISO zonal market boundaries
+core/       market-agnostic: exact planning, workload maths, analytics, cache
 hardware/   57 accelerators across 6 vendors, with provenance on every figure
-app/        the two pages, charts, panels, and the local server
-tests/      37 tests, no network required
+app/        five linked operator surfaces, charts, market context, and the local server
+tests/      offline algorithm, page, persistence and HTTP contract tests
 ```
+
+The exact planner, objective function, data semantics and current production
+limits are documented in [`docs/planner.md`](docs/planner.md).
+Quality-constrained model routing is documented in
+[`docs/routing.md`](docs/routing.md). Local hardware discovery measures device
+identity and installed memory while keeping performance and power provenance
+separate. Exact-fingerprint empirical calibration is documented in
+[`docs/calibration.md`](docs/calibration.md).
+The modality-neutral evidence schema and multi-job capacity algorithm are
+documented in [`docs/workload-optimisation.md`](docs/workload-optimisation.md).
+The repeatable Mac/iPhone/iPad evidence boundary is documented in
+[`docs/apple-measurement-protocol.md`](docs/apple-measurement-protocol.md),
+with optional dependencies pinned in `requirements-apple.txt`.
+
+The exact boundary between the current pilot foundation and a production
+control plane is documented in
+[`docs/commercial-readiness.md`](docs/commercial-readiness.md).
 
 ## Honesty rules
 

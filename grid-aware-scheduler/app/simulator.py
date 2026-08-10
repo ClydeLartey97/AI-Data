@@ -21,8 +21,10 @@ import argparse
 import html
 import json
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlencode
 
 from adapters.gb import GBAdapter
 from adapters.gb_regional import GBRegionalAdapter
@@ -31,6 +33,8 @@ from core import models as model_catalog
 from core.grid import PERIOD_HOURS
 from core.renewables import solar_capacity_factor, wind_capacity_factor
 from hardware import catalog
+from app.panels import EXPAND_JS, PANEL_CSS
+from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS
 
 OUT = Path(__file__).resolve().parent / "build" / "simulator.html"
 
@@ -49,21 +53,37 @@ def device_specs() -> dict:
 
 
 def model_specs() -> dict:
-    return {k: {
-        "name": m.name, "family": m.family, "params": m.params_b,
-        "active": m.compute_params_b, "moe": m.is_moe, "notes": m.notes,
-    } for k, m in model_catalog.CATALOG.items()}
+    out = {}
+    for k, m in model_catalog.CATALOG.items():
+        arch = model_catalog.architecture_for(k, m.params_b)
+        out[k] = {
+            "name": m.name, "family": m.family, "params": m.params_b,
+            "active": m.compute_params_b, "moe": m.is_moe, "notes": m.notes,
+            "confidence": m.confidence,
+            "arch": {"layers": arch.layers, "hidden": arch.hidden,
+                     "heads": arch.heads, "kvheads": arch.kv_heads,
+                     "estimated": arch.estimated},
+        }
+    return out
 
 
 def build_sites(days: int = 2) -> dict:
-    """Per-location renewable capacity factors, hour by hour."""
-    weather, regional = WeatherAdapter(), GBRegionalAdapter()
-    sites: dict = {}
-    for loc in PRESETS:
+    """Per-location renewable factors, bounded and fetched concurrently.
+
+    Site weather is supplementary to the placement calculation. One slow
+    public endpoint must not serially hold the Simulator page for minutes.
+    Each location gets one short attempt and failures are omitted truthfully.
+    """
+    def build_one(loc):
         try:
+            weather = WeatherAdapter(timeout_seconds=2.5, max_attempts=1)
             wx = weather.forecast(loc, days=days)
-            region = regional.for_postcode(loc.postcode) if loc.postcode else None
-            sites[loc.name] = {
+            try:
+                regional = GBRegionalAdapter(timeout_seconds=2.5, max_attempts=1)
+                region = regional.for_postcode(loc.postcode) if loc.postcode else None
+            except Exception:
+                region = None
+            return loc.name, {
                 "name": loc.name, "region": region.name if region else "—",
                 "carbon": region.carbon_forecast if region else None,
                 "solar": [round(solar_capacity_factor(w.solar_radiation_wm2,
@@ -71,7 +91,16 @@ def build_sites(days: int = 2) -> dict:
                 "wind": [round(wind_capacity_factor(w.wind_speed_100m_ms), 4) for w in wx],
             }
         except Exception:
-            continue
+            return loc.name, None
+
+    sites: dict = {}
+    with ThreadPoolExecutor(max_workers=len(PRESETS),
+                            thread_name_prefix="site-signals") as pool:
+        futures = [pool.submit(build_one, loc) for loc in PRESETS]
+        for future in as_completed(futures):
+            name, result = future.result()
+            if result:
+                sites[name] = result
     return sites
 
 
@@ -94,7 +123,25 @@ def grid_context(days: int = 2) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
-def render(devices: dict, models: dict, grid: dict, sites: dict) -> str:
+def render(devices: dict, models: dict, grid: dict, sites: dict,
+           detected: dict | None = None) -> str:
+    devices = {key: dict(value) for key, value in devices.items()}
+    local_rows = (detected or {}).get("devices", [])
+    for evidence in local_rows:
+        key = evidence.get("catalog_key")
+        if key in devices and evidence.get("memory_gb") is not None:
+            devices[key]["mem"] = evidence["memory_gb"]
+            devices[key]["memprov"] = evidence.get("memory_provenance", "MEASURED")
+    local_default = next(
+        (row.get("catalog_key") for row in local_rows
+         if row.get("catalog_key") in devices),
+        "h100-sxm",
+    )
+    local_default_count = next(
+        (int(row.get("count", 1)) for row in local_rows
+         if row.get("catalog_key") == local_default),
+        8,
+    )
     model_opts = "".join(
         '<optgroup label="{}">{}</optgroup>'.format(
             html.escape(f),
@@ -104,16 +151,78 @@ def render(devices: dict, models: dict, grid: dict, sites: dict) -> str:
     model_opts += ('<optgroup label="Custom">'
                    '<option value="__custom__">Custom model…</option></optgroup>')
     device_opts = "".join(
-        f'<option value="{k}">{html.escape(d["vendor"])} {html.escape(d["name"])}</option>'
-        for k, d in devices.items())
+        '<optgroup label="{}">{}</optgroup>'.format(
+            html.escape(vendor),
+            "".join(
+                f'<option value="{k}">{html.escape(d["name"])}</option>'
+                for k, d in devices.items() if d["vendor"] == vendor
+            ),
+        )
+        for vendor in dict.fromkeys(d["vendor"] for d in devices.values())
+    )
     count_opts = "".join(f'<option value="{n}">{n:,}</option>' for n in COUNTS)
     prec_opts = "".join(f'<option value="{p}">{p}</option>' for p in model_catalog.PRECISIONS)
     site_opts = "".join(f'<option value="{html.escape(k)}">{html.escape(k)}</option>' for k in sites)
+    if not site_opts:
+        site_opts = '<option value="">Loading site forecasts…</option>'
     cap_opts = "".join(f'<option value="{c}">{c:,} kW</option>'
                        for c in (0, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 5000, 25000))
 
-    note = (f"Priced against live GB data, {html.escape(grid['from'])}–{html.escape(grid['to'])}."
-            if grid.get("ok") else "Grid data unavailable — energy shown without cost or carbon.")
+    market_key = grid.get("market_key", "GB")
+    location_key = grid.get("location_key", "national")
+    grid_locations = grid.get("locations", [])
+    grid_location_opts = "".join(
+        f'<option value="{html.escape(choice["key"])}"'
+        f'{" selected" if choice["key"] == location_key else ""}>'
+        f'{html.escape(choice["name"])} · {html.escape(choice["detail"])}</option>'
+        for choice in grid_locations
+    )
+    if grid_locations and location_key not in {choice["key"] for choice in grid_locations}:
+        grid_location_opts = (
+            f'<option value="{html.escape(location_key)}" selected>'
+            f'Custom PNode · {html.escape(grid.get("location_name", location_key))}</option>'
+            + grid_location_opts
+        )
+    query = urlencode({"market": market_key, "location": location_key})
+    grid_href, planner_href = f"/grid?{query}", f"/planner?{query}"
+    operations_href = f"/?{query}"
+    grid_controls = "" if not grid_locations else f"""
+    <div class="ctl"><label for="marketSelect">Power market</label><select id="marketSelect">
+      <option value="GB"{" selected" if market_key == "GB" else ""}>Great Britain</option>
+      <optgroup label="United States">
+        <option value="CAISO"{" selected" if market_key == "CAISO" else ""}>California ISO</option>
+        <option value="NYISO"{" selected" if market_key == "NYISO" else ""}>New York ISO</option>
+      </optgroup>
+    </select></div>
+    <div class="ctl"><label for="gridLocation">Grid location</label>
+      <select id="gridLocation">{grid_location_opts}</select></div>"""
+    custom_node = "" if not grid.get("allows_custom_node") else """
+    <div class="ctl"><label for="customNode">Custom CAISO PNode</label>
+      <div class="joined"><input id="customNode" placeholder="Exact node ID">
+      <button id="loadNode" type="button">Load</button></div></div>"""
+    detected_items = []
+    for evidence in local_rows:
+        memory = evidence.get("memory_gb")
+        detail = f"{memory:g} GB memory measured" if memory is not None else "memory unavailable"
+        detected_items.append(
+            f'<b>{html.escape(str(evidence.get("name", "Accelerator")))}</b> · '
+            f'{html.escape(detail)} · performance '
+            f'{html.escape(str(evidence.get("performance_provenance", "UNAVAILABLE")))}'
+        )
+    detected_banner = "" if not detected_items else (
+        '<div class="detected"><span>Detected locally</span>'
+        + "<br>".join(detected_items)
+        + '<small>Identity and memory come from the operating system. '
+          'Performance and power keep their separate provenance.</small></div>'
+    )
+
+    note = (
+        f"Priced against {html.escape(grid.get('market_name', 'GB'))}, "
+        f"{html.escape(grid.get('location_name', 'national'))}, "
+        f"{html.escape(grid['from'])} to {html.escape(grid['to'])}. "
+        f"{html.escape(grid.get('signal_mode', ''))}."
+        if grid.get("ok") else "Grid data unavailable; energy is shown without cost or carbon."
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -121,6 +230,7 @@ def render(devices: dict, models: dict, grid: dict, sites: dict) -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Model Simulator — Grid-Aware Scheduler</title>
+{THEME_BOOTSTRAP}
 <style>
 :root {{
   color-scheme: light dark;
@@ -135,6 +245,11 @@ def render(devices: dict, models: dict, grid: dict, sites: dict) -> str:
     --text-2:rgba(235,235,245,.60); --text-3:rgba(235,235,245,.30); --sep:rgba(84,84,88,.65);
     --blue:#0A84FF; --green:#2A9D48; --orange:#E08A2E; --red:#E2554A; --shadow:none;
   }}
+}}
+:root[data-theme="dark"] {{
+  --bg:#000; --card:#1C1C1E; --text:#FFF;
+  --text-2:rgba(235,235,245,.60); --text-3:rgba(235,235,245,.30); --sep:rgba(84,84,88,.65);
+  --blue:#0A84FF; --green:#2A9D48; --orange:#E08A2E; --red:#E2554A; --shadow:none;
 }}
 *{{box-sizing:border-box}}
 body{{margin:0;padding:0 24px 72px;background:var(--bg);color:var(--text);
@@ -163,12 +278,16 @@ background-repeat:no-repeat;background-position:right 12px center}}
 .ctl select:focus,.ctl input:focus{{outline:none;border-color:var(--blue);
 box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 22%,transparent)}}
 .ctl select option{{background:var(--card);color:var(--text)}}
+.joined{{display:flex}} .joined input{{border-radius:10px 0 0 10px}}
+.joined button{{border:0;border-radius:0 10px 10px 0;background:var(--blue);color:#fff;
+font:600 12px inherit;padding:0 12px;cursor:pointer}}
 .seg{{display:inline-flex;gap:3px;background:color-mix(in srgb,var(--text) 5%,transparent);
 padding:3px;border-radius:980px}}
 .seg button{{font:inherit;font-size:13px;font-weight:550;padding:7px 16px;border:0;border-radius:980px;
 background:transparent;color:var(--text-2);cursor:pointer}}
 .seg button.on{{background:var(--card);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.10)}}
 .hide{{display:none}}
+.task-only.hide{{display:none}}
 .tiles{{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:1px;
 background:var(--sep);border-radius:14px;overflow:hidden;margin-top:18px}}
 .tile{{background:var(--card);padding:16px 18px}}
@@ -180,6 +299,12 @@ font-variant-numeric:tabular-nums}}
 border-radius:5px;margin-left:6px;vertical-align:2px}}
 .prov.SPEC{{background:color-mix(in srgb,var(--blue) 14%,transparent);color:var(--blue)}}
 .prov.ESTIMATED{{background:color-mix(in srgb,var(--orange) 16%,transparent);color:var(--orange)}}
+.prov.MEASURED{{background:color-mix(in srgb,var(--green) 14%,transparent);color:var(--green)}}
+.detected{{margin-bottom:18px;padding:12px 15px;border-radius:12px;
+background:color-mix(in srgb,var(--green) 10%,transparent);color:var(--text);font-size:13px}}
+.detected>span{{display:block;color:var(--green);font-size:10px;font-weight:750;
+letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px}}
+.detected small{{display:block;color:var(--text-2);margin-top:4px}}
 .warn{{margin-top:16px;padding:13px 16px;border-radius:12px;font-size:14px;
 background:color-mix(in srgb,var(--red) 10%,transparent);color:var(--red)}}
 .warn.soft{{background:color-mix(in srgb,var(--orange) 12%,transparent);color:var(--orange)}}
@@ -216,21 +341,27 @@ border:1px solid var(--sep);background:var(--card);color:var(--text)}}
 .pm-jobsub{{fill:var(--bg);font-size:10px;opacity:.75;font-variant-numeric:tabular-nums}}
 .pm-warn{{fill:var(--red);font-size:12px;font-weight:800}}
 @media(max-width:720px){{h1{{font-size:32px}}}}
+{PANEL_CSS}
+{THEME_CSS}
 </style>
 </head>
 <body>
+{THEME_CONTROL}
 <div class="wrap">
 
 <header>
   <h1>Model Simulator</h1>
   <p class="sub">How a model runs on hardware you don't have — and what the grid charges for it.</p>
-  <nav><a href="/">Grid</a><a href="/simulator" class="on">Simulator</a></nav>
+  <nav><a href="{html.escape(operations_href)}">Operations</a><a href="/simulator?{html.escape(query)}" class="on">Fleet Lab</a><a href="{html.escape(planner_href)}">Placement Lab</a><a href="{html.escape(grid_href)}">Sites &amp; Grid</a><a href="/decisions">Decisions</a></nav>
 </header>
 
 <section class="card">
   <h2>Configuration</h2>
   <p class="note">{note}</p>
+  {detected_banner}
   <div class="controls">
+    {grid_controls}
+    {custom_node}
     <div class="ctl"><label for="model">Model</label><select id="model">{model_opts}</select></div>
     <div class="ctl custom-only hide"><label for="cparams">Parameters (B)</label>
       <input id="cparams" type="number" min="0.01" step="0.1" value="7"></div>
@@ -247,13 +378,46 @@ border:1px solid var(--sep);background:var(--card);color:var(--text)}}
     <div class="ctl"><label>Task</label><span class="seg" id="task">
       <button type="button" data-t="training" class="on">Training</button>
       <button type="button" data-t="inference">Inference</button></span></div>
+    <div class="ctl training-only task-only"><label for="shard">Training memory</label><select id="shard">
+      <option value="zero3">FSDP / ZeRO-3 sharded</option>
+      <option value="replicated">Replicated data parallel</option>
+    </select></div>
+    <div class="ctl training-only task-only"><label for="statebytes">Training state bytes / parameter</label><select id="statebytes">
+      <option value="16">16 · mixed-precision Adam</option>
+      <option value="8">8 · reduced-state optimiser</option>
+    </select></div>
+    <div class="ctl training-only task-only"><label for="headroom">Activation and buffer reserve</label><select id="headroom">
+      <option value="10">10%</option><option value="20">20%</option>
+      <option value="30">30%</option><option value="50">50%</option>
+    </select></div>
+    <div class="ctl inference-only task-only hide"><label for="context">Context length</label><select id="context">
+      <option value="2048">2k</option><option value="8192">8k</option>
+      <option value="32768">32k</option><option value="131072">128k</option>
+    </select></div>
+    <div class="ctl inference-only task-only hide"><label for="batch">Concurrent sequences</label><select id="batch">
+      <option value="1">1</option><option value="8">8</option><option value="32">32</option>
+      <option value="128">128</option><option value="512">512</option>
+    </select></div>
+    <div class="ctl inference-only task-only hide"><label for="kvprec">KV cache precision</label><select id="kvprec">
+      <option value="bf16">bf16</option><option value="fp16">fp16</option>
+      <option value="fp8">fp8</option><option value="int8">int8</option>
+    </select></div>
+    <div class="ctl"><label for="pue">Facility PUE</label><select id="pue">
+      <option value="1">1.00 · IT only</option><option value="1.1">1.10</option>
+      <option value="1.2">1.20</option><option value="1.3">1.30</option>
+      <option value="1.4">1.40</option><option value="1.5">1.50</option>
+    </select></div>
+    <div class="ctl"><label for="system">Measured system efficiency</label><select id="system">
+      <option value="100">100% · idealised</option><option value="90">90%</option>
+      <option value="85">85%</option><option value="80">80%</option><option value="70">70%</option>
+    </select></div>
   </div>
   <div class="tiles" id="tiles"></div>
   <div id="warn"></div>
   <ul class="assum" id="assum"></ul>
 </section>
 
-<section class="card">
+<section class="card pnl">
   <h2>Allocation path</h2>
   <p class="note">Work splits across groups in proportion to what each can actually deliver, so every group finishes together. Split evenly instead and the slowest sets the finish time while the fastest idle at part load.</p>
   <div class="fleet" id="fleet"></div>
@@ -267,11 +431,11 @@ border:1px solid var(--sep);background:var(--card);color:var(--text)}}
     <button type="button" class="ch-btn" id="addBtn">Add group</button>
     <span class="fleet-sum" id="fleetSum"></span>
   </div>
-  <svg id="pathmap" viewBox="0 0 1000 300" role="img"
+  <svg id="pathmap" viewBox="0 0 1000 300" role="img" data-inspector='{{"kind":"diagram"}}'
        aria-label="Allocation of work across device groups and time windows"></svg>
 </section>
 
-<section class="card">
+<section class="card pnl">
   <h2>On-site renewables</h2>
   <p class="note"><span class="prov ESTIMATED">ESTIMATED</span></p>
   <div class="controls">
@@ -312,10 +476,37 @@ var SITES = {json.dumps(sites)};
 var COUNTS = {json.dumps(COUNTS)};
 var BYTES = {json.dumps(model_catalog.BYTES_PER_PARAM)};
 var LINK = {{"NVLink":450,"PCIe":50,"Ethernet":25,"Unified memory":0,"None":0}};
+var SYMBOL = GRID.symbol || "£";
 
-var S = {{ model:"llama31-8b", prec:"bf16", device:"h100-sxm", count:8,
+var S = {{ model:"llama31-8b", prec:"bf16", device:{json.dumps(local_default)}, count:{local_default_count},
           task:"training", tokens:1e9, cparams:7, cactive:0,
-          site:Object.keys(SITES)[0], solar:10, wind:5 }};
+          site:Object.keys(SITES)[0], solar:10, wind:5, shard:"zero3",
+          statebytes:16, headroom:20, context:8192, batch:8, kvprec:"bf16",
+          pue:1.2, system:85 }};
+
+// Configuration is URL state. A scenario can be bookmarked, shared with an
+// operator, or returned to after a review instead of disappearing on reload.
+(function loadURLState(){{
+  var q=new URLSearchParams(location.search);
+  Object.keys(S).forEach(function(k){{
+    if(!q.has(k)) return;
+    var raw=q.get(k), numeric=["count","tokens","cparams","cactive","solar","wind",
+      "statebytes","headroom","context","batch","pue","system"].indexOf(k)>=0;
+    S[k]=numeric?(+raw||S[k]):raw;
+  }});
+  if(S.model!=="__custom__"&&!MODELS[S.model]) S.model="llama31-8b";
+  if(!D[S.device]) S.device={json.dumps(local_default)};
+  if(!BYTES[S.prec]) S.prec="bf16";
+  if(["training","inference"].indexOf(S.task)<0) S.task="training";
+  if(["zero3","replicated"].indexOf(S.shard)<0) S.shard="zero3";
+  if(!BYTES[S.kvprec]) S.kvprec="bf16";
+  if(COUNTS.indexOf(S.count)<0) S.count={local_default_count};
+  if(!(S.tokens>0)) S.tokens=1e9;
+  S.pue=Math.min(3,Math.max(1,S.pue));
+  S.system=Math.min(100,Math.max(1,S.system));
+  S.context=Math.max(1,S.context); S.batch=Math.max(1,S.batch);
+  if(S.site&&!SITES[S.site]) S.site=Object.keys(SITES)[0];
+}})();
 
 function nf(v,d){{ return v.toLocaleString("en-GB",{{minimumFractionDigits:d,maximumFractionDigits:d}}); }}
 function dur(h){{
@@ -340,24 +531,52 @@ function modelOf(){{
   return MODELS[S.model];
 }}
 function wbytes(m){{ return m.params*1e9*BYTES[S.prec]; }}
-function memNeed(m){{ return wbytes(m)/1e9 * (S.task==="training"?4:1.25); }}
+function archOf(m){{
+  if(m.arch) return m.arch;
+  var rows=[[1.5,16,2048,16],[4,28,3072,24],[9,32,4096,32],
+    [16,40,5120,40],[35,48,6144,48],[80,80,8192,64],[200,96,12288,96],
+    [1e12,126,16384,128]];
+  for(var i=0;i<rows.length;i++) if(m.params<=rows[i][0]) return {{
+    layers:rows[i][1],hidden:rows[i][2],heads:rows[i][3],
+    kvheads:Math.min(8,rows[i][3]),estimated:true}};
+}}
+function kvGB(m){{
+  if(S.task!=="inference") return 0;
+  var a=archOf(m), elem=BYTES[S.kvprec]||2, hd=a.hidden/a.heads;
+  return 2*a.layers*a.kvheads*hd*S.context*S.batch*elem/1e9;
+}}
+function memNeed(m,n){{
+  var weights=wbytes(m)/1e9;
+  if(S.task==="inference") return weights+kvGB(m);
+  var state=m.params*S.statebytes*(1+S.headroom/100);
+  return S.shard==="zero3" ? state : state*n;
+}}
+function fitsMemory(m,dev,n){{
+  var state=m.params*S.statebytes*(1+S.headroom/100);
+  if(S.task==="training" && S.shard==="replicated") return dev.mem>=state;
+  return dev.mem*n>=memNeed(m,n);
+}}
 function scaling(m,dev,n){{
-  if(n<=1 || dev.link==="Unified memory") return 1;
-  var l = LINK[dev.link]||0; if(!l) return 1;
+  var system=Math.max(.01,S.system/100);
+  if(n<=1 || dev.link==="Unified memory") return system;
+  var l = LINK[dev.link]||0; if(!l) return system;
   var compute = (6*m.active*1e9*2e6)/(dev.tflops*dev.mfu*n*1e12);
   var comm = (2*(n-1)/n*wbytes(m))/(l*1e9);
-  return compute/(compute+comm);
+  return compute/(compute+comm)*system;
 }}
 function est(dk,n){{
-  var dev=D[dk], m=modelOf(), eff=scaling(m,dev,n), mem=dev.mem*n, hours, kw;
+  var dev=D[dk], m=modelOf(), eff=scaling(m,dev,n), mem=dev.mem*n, hours, itkw;
   if(S.task==="training"){{
     hours = (6*m.active*1e9*S.tokens)/(dev.tflops*dev.mfu*n*eff*1e12)/3600;
-    kw = dev.tdp*n/1000;
+    itkw = dev.tdp*n/1000;
   }} else {{
     hours = (S.tokens/((dev.bw*1e9*n)/wbytes(m)))/3600;
-    kw = (dev.idle+(dev.tdp-dev.idle)*0.6)*n/1000;
+    hours = hours/Math.max(.01,S.system/100);
+    itkw = (dev.idle+(dev.tdp-dev.idle)*0.6)*n/1000;
   }}
-  return {{hours:hours, kwh:kw*hours, kw:kw, mem:mem, scaling:eff, fits:mem>=memNeed(m)}};
+  var kw=itkw*S.pue;
+  return {{hours:hours, kwh:kw*hours, kw:kw, itkw:itkw, mem:mem, scaling:eff,
+           fits:fitsMemory(m,dev,n)}};
 }}
 function money(k){{ return GRID.ok ? k*GRID.price_cheap/1000 : null; }}
 function co2(k){{ return GRID.ok ? k*GRID.carbon_clean/1000 : null; }}
@@ -366,15 +585,16 @@ function render(){{
   var m=modelOf(), dev=D[S.device], r=est(S.device,S.count);
   var c=money(r.kwh), g=co2(r.kwh);
   document.getElementById("tiles").innerHTML =
-    tile("Runtime",dur(r.hours),nf(r.kw,1)+" kW draw") +
-    tile("Energy",nf(r.kwh,0)+" kWh","whole run") +
-    tile("Cost",c===null?"—":"£"+nf(c,2),"cheapest window") +
+    tile("Runtime",dur(r.hours),nf(r.kw,1)+" kW facility · "+nf(r.itkw,1)+" kW IT") +
+    tile("Facility energy",nf(r.kwh,0)+" kWh","PUE "+nf(S.pue,2)+" · whole run") +
+    tile("Cost",c===null?"—":SYMBOL+nf(c,2),"cheapest window") +
     tile("Carbon",g===null?"—":nf(g,1)+" kg","cleanest window") +
-    tile("Memory",nf(r.mem,0)+" GB","need ~"+nf(memNeed(m),0)+" GB");
+    tile("Memory",nf(r.mem,0)+" GB","need ~"+nf(memNeed(m,S.count),0)+" GB"+
+      (dev.memprov?" · capacity "+dev.memprov:""));
 
   var w=[];
   if(!r.fits) w.push('<div class="warn"><b>Does not fit.</b> '+m.name+' at '+S.prec+
-    ' needs about '+nf(memNeed(m),0)+' GB for '+S.task+'; '+nf(S.count,0)+'\\u00d7 '+dev.name+
+    ' needs about '+nf(memNeed(m,S.count),0)+' GB across the fleet for '+S.task+'; '+nf(S.count,0)+'\\u00d7 '+dev.name+
     ' gives '+nf(r.mem,0)+' GB. Runtime below is compute cost only.</div>');
   if(m.moe) w.push('<div class="warn soft"><b>Mixture of experts.</b> '+nf(m.params,0)+
     'B total, ~'+nf(m.active,0)+'B active per token. Compute uses the active count; memory '+
@@ -388,9 +608,18 @@ function render(){{
       : "Decode bounded by memory bandwidth: tokens/sec \\u2248 bandwidth \\u00f7 model bytes.",
     dev.name+" at "+nf(dev.mfu*100,0)+"% of its "+nf(dev.tflops,0)+" TFLOPS peak, not peak.",
     S.count>1 ? "Scaling "+nf(r.scaling*100,0)+"% of linear over "+dev.link+
-      " \\u2014 communication only; pipeline bubbles and stragglers not modelled, so optimistic."
-      : "Single device \\u2014 no scaling loss.",
-    "Source: "+(dev.source||"\\u2014")
+      " including the selected "+nf(S.system,0)+"% measured system efficiency."
+      : "Single device at "+nf(S.system,0)+"% measured system efficiency.",
+    "Facility energy = IT energy \\u00d7 PUE "+nf(S.pue,2)+".",
+    S.task==="inference" ? "KV cache: "+nf(kvGB(m),1)+" GB for "+nf(S.batch,0)+
+      " sequences at "+nf(S.context,0)+" tokens and "+S.kvprec+
+      (archOf(m).estimated?" (architecture estimated).":".")
+      : (S.shard==="zero3"?"Training state sharded across the fleet.":
+        "Training state replicated on every accelerator.")+" "+nf(S.statebytes,0)+
+        " bytes/parameter with "+nf(S.headroom,0)+"% activation and buffer reserve.",
+    dev.memprov ? "Memory capacity: "+dev.memprov+" from local hardware detection."
+      : "Memory capacity: "+dev.prov+" catalogue value.",
+    "Performance and power source: "+(dev.source||"\\u2014")
   ].map(function(x){{return "<li>"+x+"</li>";}}).join("");
 
   var rows=Object.keys(D).map(function(k){{return {{k:k,d:D[k],r:est(k,S.count)}};}})
@@ -399,9 +628,10 @@ function render(){{
   document.querySelector("#cmp tbody").innerHTML=rows.map(function(x){{
     return '<tr class="'+(!x.r.fits?"nofit":(best&&x.k===best.k?"best":""))+'"><td>'+
       x.d.vendor+" "+x.d.name+'<span class="prov '+x.d.prov+'">'+x.d.prov+
-      "</span></td><td>"+dur(x.r.hours)+"</td><td>"+nf(x.r.kw,1)+" kW</td><td><b>"+
+      "</span>"+(x.d.memprov?'<span class="prov '+x.d.memprov+'">MEMORY '+x.d.memprov+'</span>':"")+
+      "</td><td>"+dur(x.r.hours)+"</td><td>"+nf(x.r.kw,1)+" kW</td><td><b>"+
       nf(x.r.kwh,0)+" kWh</b></td><td>"+nf(x.r.mem,0)+" GB</td><td>"+
-      (money(x.r.kwh)===null?"—":"£"+nf(money(x.r.kwh),2))+"</td><td>"+
+      (money(x.r.kwh)===null?"—":SYMBOL+nf(money(x.r.kwh),2))+"</td><td>"+
       (co2(x.r.kwh)===null?"—":nf(co2(x.r.kwh),1)+" kg")+"</td></tr>";
   }}).join("");
 
@@ -413,15 +643,31 @@ function render(){{
   }}).join("");
 
   renewables(r.kw);
-  if (typeof drawPath === 'function') drawPath();
-  if (typeof drawFleet === 'function') drawPath();
+  if (typeof drawFleet === 'function') drawFleet();
   document.getElementById("foot").textContent =
     m.name+" \\u00b7 "+nf(m.params,1)+"B parameters at "+S.prec+" \\u00b7 needs ~"+
-    nf(memNeed(m),0)+" GB.";
+    nf(memNeed(m,S.count),0)+" GB.";
+  syncURL();
+}}
+
+function syncURL(){{
+  var q=new URLSearchParams(location.search);
+  Object.keys(S).forEach(function(k){{ if(k!=="site"||S[k]) q.set(k,String(S[k])); }});
+  history.replaceState(null,"",location.pathname+"?"+q.toString());
+}}
+
+function goMarket(market,locationKey){{
+  syncURL(); var q=new URLSearchParams(location.search);
+  q.set("market",market); q.set("location",locationKey); q.delete("custom_node");
+  location.href=location.pathname+"?"+q.toString();
 }}
 
 function renewables(load){{
-  var s=SITES[S.site]; if(!s) return;
+  var svg=document.getElementById("rchart"),s=SITES[S.site];
+  if(!s){{svg.dataset.inspector=JSON.stringify({{kind:"line",xLabel:"Forecast hour",xSuffix:" h",
+    yLabel:"Power",ySuffix:" kW",precision:2,series:[]}});
+    document.getElementById("rtiles").innerHTML=tile("Site forecast","Loading…","The simulator remains usable while optional weather signals refresh.");
+    document.getElementById("rgap").innerHTML="";return;}}
   var n=s.solar.length,matched=0,imp=0,cur=0,gen=0,full=0,avail=[];
   for(var i=0;i<n;i++){{
     var a=s.solar[i]*S.solar+s.wind[i]*S.wind;
@@ -439,7 +685,7 @@ function renewables(load){{
     ? '<div class="warn soft"><b>Generates '+nf(annual,0)+'% of what it needs, covers '+
       nf(hourly,1)+'% of it.</b> Annual netting would call this fully renewable; '+nf(imp,0)+
       ' kWh is still bought, because the generation arrived when the load did not.</div>':"";
-  var svg=document.getElementById("rchart"),W=1000,H=190,P=22;
+  var W=1000,H=190,P=22;
   var peak=Math.max(load,Math.max.apply(null,avail))||1;
   function X(i){{return n<2?W/2:(i/(n-1))*W;}} function Y(v){{return P+(H-P*2)*(1-v/peak);}}
   var line=""; for(var j=0;j<n;j++) line+=(j?"L":"M")+X(j).toFixed(1)+","+Y(avail[j]).toFixed(1);
@@ -450,6 +696,10 @@ function renewables(load){{
     '" stroke="var(--blue)" stroke-width="2" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>'+
     '<text x="4" y="'+(Y(load)-6).toFixed(1)+'" fill="var(--blue)" font-size="11">load '+
     nf(load,1)+' kW</text>';
+  svg.dataset.inspector=JSON.stringify({{kind:"line",xLabel:"Forecast hour",xSuffix:" h",
+    yLabel:"Power",ySuffix:" kW",precision:2,series:[
+      {{name:"Renewable generation",color:"--green",area:true,points:avail.map(function(v,i){{return [i,v]}})}},
+      {{name:"Facility load",color:"--blue",dash:true,points:avail.map(function(v,i){{return [i,load]}})}}]}});
 }}
 
 function bind(id,key,num){{
@@ -464,13 +714,48 @@ function bind(id,key,num){{
   el.addEventListener("change",upd);
   if(el.tagName==="INPUT") el.addEventListener("input",upd);
 }}
-["model","prec","device","site"].forEach(function(i){{bind(i,i,false);}});
-["count","tokens","cparams","cactive","solar","wind"].forEach(function(i){{bind(i,i,true);}});
+["model","prec","device","site","shard","kvprec"].forEach(function(i){{bind(i,i,false);}});
+["count","tokens","cparams","cactive","solar","wind","statebytes","headroom","context","batch","pue","system"].forEach(function(i){{bind(i,i,true);}});
+document.querySelectorAll(".custom-only").forEach(function(x){{
+  x.classList.toggle("hide",S.model!=="__custom__");
+}});
 document.querySelectorAll("#task button").forEach(function(b){{
+  b.classList.toggle("on",b.dataset.t===S.task);
   b.addEventListener("click",function(){{
     document.querySelectorAll("#task button").forEach(function(o){{o.classList.remove("on");}});
-    b.classList.add("on"); S.task=b.dataset.t; render(); }});
+    b.classList.add("on"); S.task=b.dataset.t;
+    document.querySelectorAll(".training-only").forEach(function(x){{x.classList.toggle("hide",S.task!=="training");}});
+    document.querySelectorAll(".inference-only").forEach(function(x){{x.classList.toggle("hide",S.task!=="inference");}});
+    render(); }});
 }});
+document.querySelectorAll(".training-only").forEach(function(x){{x.classList.toggle("hide",S.task!=="training");}});
+document.querySelectorAll(".inference-only").forEach(function(x){{x.classList.toggle("hide",S.task!=="inference");}});
+var marketSelect=document.getElementById("marketSelect"), gridLocation=document.getElementById("gridLocation");
+if(marketSelect) marketSelect.addEventListener("change",function(){{
+  var defaults={{GB:"national",CAISO:"sp15",NYISO:"nyc"}};
+  goMarket(this.value,defaults[this.value]||"national");
+}});
+if(gridLocation) gridLocation.addEventListener("change",function(){{
+  goMarket({json.dumps(market_key)},this.value);
+}});
+var loadNode=document.getElementById("loadNode");
+if(loadNode) loadNode.addEventListener("click",function(){{
+  var value=document.getElementById("customNode").value.trim();
+  if(value) goMarket("CAISO",value);
+}});
+
+function installSites(next){{
+  var keys=next&&typeof next==="object"?Object.keys(next):[];if(!keys.length)return false;
+  SITES=next;var select=document.getElementById("site");select.innerHTML=keys.map(function(k){{
+    return '<option value="'+k.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;")+'">'+
+      k.replace(/&/g,"&amp;").replace(/</g,"&lt;")+"</option>";}}).join("");
+  if(!S.site||!SITES[S.site])S.site=keys[0];select.value=S.site;render();return true;
+}}
+function pollSites(){{fetch("/api/v1/sites").then(function(response){{return response.json()}}).then(function(payload){{
+  if(installSites(payload.sites))return;if(payload.refreshing)setTimeout(pollSites,1000);else
+    document.getElementById("rtiles").innerHTML=tile("Site forecast","Unavailable","Optional public weather signals did not respond. Hardware and grid calculations remain active.");
+}}).catch(function(){{setTimeout(pollSites,2500)}})}}
+if(!Object.keys(SITES).length)setTimeout(pollSites,100);
 
 var FLEET = [];
 function fleetCap(dk){{ var d=D[dk], m=modelOf();
@@ -482,14 +767,18 @@ function allocate(){{
   var tot = caps.reduce(function(a,b){{return a+b;}},0)||1;
   var mem = gs.reduce(function(a,g){{ return a+D[g.dev].mem*g.n; }},0);
   var hours = S.task==="training"
-    ? (6*m.active*1e9*S.tokens)/(tot*1e12)/3600
-    : (S.tokens/(tot*1e12))/3600;
+    ? (6*m.active*1e9*S.tokens)/(tot*Math.max(.01,S.system/100)*1e12)/3600
+    : (S.tokens/(tot*Math.max(.01,S.system/100)*1e12))/3600;
   var legs = gs.map(function(g,i){{ var d=D[g.dev];
-    var kw=(S.task==="training"? d.tdp : d.idle+(d.tdp-d.idle)*0.6)*g.n/1000;
+    var kw=(S.task==="training"? d.tdp : d.idle+(d.tdp-d.idle)*0.6)*g.n/1000*S.pue;
     return {{dev:g.dev,name:d.name,n:g.n,share:caps[i]/tot,kw:kw}}; }});
   var kw = legs.reduce(function(a,l){{return a+l.kw;}},0);
-  return {{legs:legs,hours:hours,kw:kw,kwh:kw*hours,mem:mem,need:memNeed(m),
-          fits: mem>=memNeed(m)}};
+  var count=gs.reduce(function(a,g){{return a+g.n;}},0);
+  var need=memNeed(m,count);
+  var fits=S.task==="training"&&S.shard==="replicated"
+    ? gs.every(function(g){{return D[g.dev].mem>=m.params*S.statebytes*(1+S.headroom/100);}})
+    : mem>=need;
+  return {{legs:legs,hours:hours,kw:kw,kwh:kw*hours,mem:mem,need:need,fits:fits}};
 }}
 function drawPath(){{
   var a=allocate(), svg=document.getElementById("pathmap"); if(!svg) return;
@@ -526,7 +815,7 @@ function drawPath(){{
       nf(l.share*100,1)+"% of work \u00b7 "+nf(l.kw,1)+" kW</text>";
     labs+='<text class="pm-lab" x="'+(xW+10)+'" y="'+(cy-(room?4:-4)).toFixed(1)+'">'+win+"</text>";
     if(room){{ var b=[dur(l.hours!==undefined?l.hours:a.hours)];
-      if(GRID.ok){{ b.push("\u00a3"+nf(GRID.price_cheap,0)+"/MWh");
+      if(GRID.ok){{ b.push(SYMBOL+nf(GRID.price_cheap,0)+"/MWh");
                    b.push(nf(GRID.carbon_clean,0)+" gCO\u2082"); }}
       labs+='<text class="pm-sub" x="'+(xW+10)+'" y="'+(cy+10).toFixed(1)+'">'+
         b.join(" \u00b7 ")+"</text>"; }}
@@ -567,6 +856,7 @@ function drawFleet(){{
   drawFleet();
 }})();
 render();
+{EXPAND_JS}
 </script>
 </body>
 </html>"""

@@ -42,6 +42,26 @@ from sources.carbon_intensity.client import CarbonIntensityClient  # noqa: E402
 #: rebucketed, so the UI reports the operator's judgement, not ours.
 INDEX_ORDER = ["very low", "low", "moderate", "high", "very high"]
 
+# Carbon Intensity API region identifiers. The first fourteen are the
+# distribution regions returned by the live regional endpoint. National
+# aggregates are intentionally excluded from a location selector.
+REGIONS: dict[str, tuple[int, str]] = {
+    "north-scotland": (1, "North Scotland"),
+    "south-scotland": (2, "South Scotland"),
+    "north-west-england": (3, "North West England"),
+    "north-east-england": (4, "North East England"),
+    "yorkshire": (5, "Yorkshire"),
+    "north-wales-merseyside": (6, "North Wales and Merseyside"),
+    "south-wales": (7, "South Wales"),
+    "west-midlands": (8, "West Midlands"),
+    "east-midlands": (9, "East Midlands"),
+    "east-england": (10, "East England"),
+    "south-west-england": (11, "South West England"),
+    "south-england": (12, "South England"),
+    "london": (13, "London"),
+    "south-east-england": (14, "South East England"),
+}
+
 
 @dataclass
 class RegionSignal:
@@ -91,8 +111,13 @@ def _region_from(entry: dict, inner: dict | None = None) -> RegionSignal:
 class GBRegionalAdapter:
     """Location-aware GB carbon intensity. Carbon only — see module docstring."""
 
-    def __init__(self, client: CarbonIntensityClient | None = None) -> None:
-        self._client = client or CarbonIntensityClient()
+    def __init__(self, client: CarbonIntensityClient | None = None, *,
+                 timeout_seconds: float = 30.0,
+                 max_attempts: int = 3) -> None:
+        self._client = client or CarbonIntensityClient(
+            timeout_seconds=timeout_seconds,
+            max_attempts=max_attempts,
+        )
 
     @property
     def market_name(self) -> str:

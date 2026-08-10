@@ -29,7 +29,7 @@ _NGT_PATH = Path(os.environ.get("NATIONAL_GRID_TOOL_PATH", _DEFAULT_NGT_PATH))
 if str(_NGT_PATH) not in sys.path:
     sys.path.insert(0, str(_NGT_PATH))
 
-from sources.weather.open_meteo import fetch_forecast  # noqa: E402
+from sources.weather.open_meteo import OpenMeteoClient, fetch_forecast  # noqa: E402
 
 #: Rough cut-in / rated speeds for a typical utility-scale turbine, at 100 m.
 #: Used only to say "windy enough to generate" in plain language — this is a
@@ -83,8 +83,16 @@ class WeatherPoint:
 class WeatherAdapter:
     """Weather for a location, on the same forward-looking basis as the grid."""
 
+    def __init__(self, *, timeout_seconds: float = 30.0,
+                 max_attempts: int = 3) -> None:
+        self._client = OpenMeteoClient(
+            timeout_seconds=timeout_seconds,
+            max_attempts=max_attempts,
+        )
+
     def forecast(self, location: Location, days: int = 2) -> list[WeatherPoint]:
-        frame = fetch_forecast(location.latitude, location.longitude, days=days)
+        frame = fetch_forecast(location.latitude, location.longitude, days=days,
+                               client=self._client)
         return [
             WeatherPoint(
                 timestamp=row.start_time.to_pydatetime(),

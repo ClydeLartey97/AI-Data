@@ -22,14 +22,20 @@ import html
 import webbrowser
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+from urllib.parse import urlencode
 
 from adapters.base_adapter import GridDataPoint
 from adapters.gb_regional import GBRegionalAdapter
 from core import analytics, feed
 from app.panels import (EXPAND_JS, PANEL_CSS, duration_panel, profile_panel,
                         savings_panel, scatter_panel)
+from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS
 from app.chart import CHART_CSS, Band, ChartSeries, chart
 from core.grid import Job, cheapest_window, cleanest_window, compare, run_immediately
+
+if TYPE_CHECKING:
+    from app.markets import MarketContext
 
 OUT = Path(__file__).resolve().parent / "build" / "grid_dashboard.html"
 
@@ -147,6 +153,62 @@ def _tile(label: str, value: str, sub: str, *, accent: str = "") -> str:
     </div>"""
 
 
+def _spread(values: list[float]) -> str:
+    """Range ratio where a ratio is meaningful, including negative prices."""
+    lo, hi = min(values), max(values)
+    if lo <= 0:
+        return f"{hi - lo:,.1f} absolute spread"
+    return f"{hi / lo:.1f}x spread"
+
+
+def _latest_complete_horizon(series: list[GridDataPoint], periods: int
+                             ) -> list[GridDataPoint]:
+    """Most recent contiguous, fully priced/carbon-scored decision horizon."""
+    width = min(periods, len(series))
+    for end in range(len(series), width - 1, -1):
+        block = series[end - width:end]
+        complete = all(p.price is not None and p.carbon_intensity is not None for p in block)
+        contiguous = all(
+            b.timestamp - a.timestamp == timedelta(minutes=30)
+            for a, b in zip(block, block[1:])
+        )
+        if complete and contiguous:
+            return block
+    raise ValueError("no complete contiguous decision horizon")
+
+
+def _market_controls(context: "MarketContext | None") -> str:
+    if context is None:
+        return ""
+    options = "".join(
+        f'<option value="{html.escape(choice.key)}"'
+        f'{" selected" if choice.key == context.location_key else ""}>'
+        f'{html.escape(choice.name)} · {html.escape(choice.detail)}</option>'
+        for choice in context.locations
+    )
+    if context.location_key not in {choice.key for choice in context.locations}:
+        options = (
+            f'<option value="{html.escape(context.location_key)}" selected>'
+            f'Custom PNode · {html.escape(context.location_name)}</option>'
+            + options
+        )
+    custom = "" if not context.allows_custom_node else """
+    <label>Custom PNode <span><input name="custom_node" placeholder="Exact CAISO node ID">
+      <button type="submit">Load</button></span></label>"""
+    return f"""
+<form class="market-controls" action="/" method="get">
+  <label>Power market <select name="market" id="marketSelect">
+    <option value="GB"{" selected" if context.market_key == "GB" else ""}>Great Britain</option>
+    <optgroup label="United States">
+      <option value="CAISO"{" selected" if context.market_key == "CAISO" else ""}>California ISO</option>
+      <option value="NYISO"{" selected" if context.market_key == "NYISO" else ""}>New York ISO</option>
+    </optgroup>
+  </select></label>
+  <label>Grid location <select name="location">{options}</select></label>
+  <button type="submit">Apply</button>{custom}
+</form>"""
+
+
 def _regions_card() -> str:
     """All 18 GB grid regions, right now.
 
@@ -207,7 +269,7 @@ def _regions_card() -> str:
 </section>"""
 
 
-def _analytics_grid(series: list[GridDataPoint]) -> str:
+def _analytics_grid(series: list[GridDataPoint], symbol: str) -> str:
     """The panels a data-centre operator with a carbon target actually needs.
 
     Each answers a decision, measured over the whole cached history rather
@@ -233,35 +295,35 @@ def _analytics_grid(series: list[GridDataPoint]) -> str:
 <section class="grid4">
   <div class="pnl">
     <h3>What a deadline is worth <em>cost</em></h3>
-    {savings_panel(sav_cost, unit="% cost saved")}
+    {savings_panel(sav_cost, unit="% cost saved", color="--price")}
     <p class="pnl-note">A 4&nbsp;h job at a <b>24&nbsp;h</b> deadline saves
       <b>{head(day):.1f}%</b> median{f", at a week <b>{sav_cost.median[week]:.0f}%</b>" if week >= 0 else ""}.
       Every start in {len(series)//48:,} days, not one example.</p>
   </div>
   <div class="pnl">
     <h3>What a deadline is worth <em>carbon</em></h3>
-    {savings_panel(sav_carb, unit="% carbon saved")}
+    {savings_panel(sav_carb, unit="% carbon saved", color="--carbon")}
     <p class="pnl-note">Same job, carbon objective: <b>{carb_day:.1f}%</b> median at 24&nbsp;h.
       Lower than the cost figure — carbon is less volatile than price.</p>
   </div>
   <div class="pnl">
     <h3>Time of day <em>price</em></h3>
-    {profile_panel(price_prof, color="--price")}
+    {profile_panel(price_prof, color="--price", label="Mean price", unit=f" {symbol}/MWh")}
     <p class="pnl-note">Mean with p10–p90 band, by hour, whole history.</p>
   </div>
   <div class="pnl">
     <h3>Time of day <em>carbon</em></h3>
-    {profile_panel(carbon_prof, color="--carbon")}
+    {profile_panel(carbon_prof, color="--carbon", label="Mean carbon", unit=" gCO₂/kWh")}
     <p class="pnl-note">The daily cycle a deadline longer than a day can exploit.</p>
   </div>
   <div class="pnl">
     <h3>Duration curve <em>price</em></h3>
-    {duration_panel(dur_p, color="--price")}
+    {duration_panel(dur_p, color="--price", label="Price", unit=f" {symbol}/MWh")}
     <p class="pnl-note">Sorted worst to best. The steep left tail is where the money is.</p>
   </div>
   <div class="pnl">
     <h3>Duration curve <em>carbon</em></h3>
-    {duration_panel(dur_c, color="--carbon")}
+    {duration_panel(dur_c, color="--carbon", label="Carbon", unit=" gCO₂/kWh")}
     <p class="pnl-note">A flat middle means shifting within it buys little.</p>
   </div>
   <div class="pnl span2">
@@ -276,11 +338,37 @@ def _analytics_grid(series: list[GridDataPoint]) -> str:
 </section>"""
 
 
-def render(series: list[GridDataPoint], job: Job, market: str, currency: str) -> str:
+def render(series: list[GridDataPoint], job: Job, market: str, currency: str,
+           *, context: "MarketContext | None" = None) -> str:
+    if not series:
+        raise ValueError("dashboard needs at least one grid point")
     carbon = [p.carbon_intensity for p in series]
     price = [p.price for p in series]
     live_c = [v for v in carbon if v is not None]
     live_p = [v for v in price if v is not None]
+    if not live_c or not live_p:
+        raise ValueError("dashboard needs both price and carbon signals")
+    symbol = context.symbol if context else ("£" if currency == "GBP" else "$" if currency == "USD" else "")
+    price_label = context.price_label if context else "Day-ahead price"
+    carbon_label = context.carbon_label if context else "Carbon intensity forecast"
+    location_name = context.location_name if context else market
+    signal_mode = context.signal_mode if context else "Live API data"
+    provenance = context.provenance if context else (
+        f"Carbon: National Grid ESO Carbon Intensity API. Price: Elexon Insights "
+        f"Market Index Data, {PRICE_PROVIDER_NOTE}."
+    )
+    planner_href, simulator_href, operations_href, grid_view_href = (
+        "/planner", "/simulator", "/", "/grid"
+    )
+    if context:
+        shared_query = urlencode({
+            "market": context.market_key,
+            "location": context.location_key,
+        })
+        planner_href += "?" + shared_query
+        simulator_href += "?" + shared_query
+        operations_href += "?" + shared_query
+        grid_view_href += "?" + shared_query
 
     # The decision must be made over the window a job would actually face —
     # the most recent deadline's worth of data — not over the whole history
@@ -288,7 +376,7 @@ def render(series: list[GridDataPoint], job: Job, market: str, currency: str) ->
     # "run immediately" baseline dated three weeks ago, which is not a
     # decision anyone could act on, and put the chosen window off the edge of
     # every visible chart range.
-    horizon = series[-job.deadline_periods:] if len(series) > job.deadline_periods else series
+    horizon = _latest_complete_horizon(series, job.deadline_periods)
     cost_cmp = compare(horizon, job, objective="cost")
     clean = cleanest_window(horizon, job)
     baseline = cost_cmp.baseline
@@ -298,7 +386,11 @@ def render(series: list[GridDataPoint], job: Job, market: str, currency: str) ->
     scheduled_end = scheduled.start_time + run
     clean_end = clean.start_time + run
 
-    now = series[0].timestamp
+    range_start = series[0].timestamp
+    current = horizon[-1]
+    complete_count = sum(
+        p.price is not None and p.carbon_intensity is not None for p in series
+    )
     generated = datetime.now(timezone.utc)
 
     # The two objectives can genuinely disagree — cheapest is not always
@@ -324,6 +416,7 @@ def render(series: list[GridDataPoint], job: Job, market: str, currency: str) ->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Grid Signal — {html.escape(market)}</title>
+{THEME_BOOTSTRAP}
 <style>
 :root {{
   color-scheme: light dark;
@@ -335,6 +428,10 @@ def render(series: list[GridDataPoint], job: Job, market: str, currency: str) ->
   --sep: rgba(60,60,67,0.18);
   --carbon: {CARBON_LIGHT};
   --price: {PRICE_LIGHT};
+  --blue: {PRICE_LIGHT};
+  --green: {CARBON_LIGHT};
+  --orange: #B35300;
+  --red: #C7261B;
   --shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.06);
 }}
 /* Dark is a selected set of steps, not an automatic inversion: the series
@@ -351,6 +448,10 @@ def render(series: list[GridDataPoint], job: Job, market: str, currency: str) ->
     --sep: rgba(84,84,88,0.65);
     --carbon: {CARBON_DARK};
     --price: {PRICE_DARK};
+    --blue: {PRICE_DARK};
+    --green: {CARBON_DARK};
+    --orange: #E08A2E;
+    --red: #E2554A;
     --shadow: none;
   }}
 }}
@@ -363,6 +464,10 @@ def render(series: list[GridDataPoint], job: Job, market: str, currency: str) ->
   --sep: rgba(84,84,88,0.65);
   --carbon: {CARBON_DARK};
   --price: {PRICE_DARK};
+  --blue: {PRICE_DARK};
+  --green: {CARBON_DARK};
+  --orange: #E08A2E;
+  --red: #E2554A;
   --shadow: none;
 }}
 * {{ box-sizing: border-box; }}
@@ -384,6 +489,16 @@ nav a {{ font-size: 13px; font-weight: 550; text-decoration: none; padding: 6px 
   border-radius: 980px; color: var(--text-2);
   background: color-mix(in srgb, var(--text) 5%, transparent); }}
 nav a.on {{ background: var(--price); color: #fff; }}
+.market-controls {{ margin-top: 16px; display: flex; flex-wrap: wrap; gap: 9px; align-items: end; }}
+.market-controls label {{ display: flex; flex-direction: column; gap: 4px; color: var(--text-2);
+  font-size: 11px; font-weight: 550; }}
+.market-controls label span {{ display: flex; }}
+.market-controls select, .market-controls input {{ min-width: 170px; max-width: 300px; padding: 7px 28px 7px 9px;
+  border: 1px solid var(--sep); border-radius: 9px; background: var(--card); color: var(--text); font: inherit; font-size: 12px; }}
+.market-controls input {{ min-width: 190px; border-radius: 9px 0 0 9px; padding-right: 9px; }}
+.market-controls button {{ padding: 8px 12px; border: 0; border-radius: 9px; background: var(--price);
+  color: #fff; font: 650 12px/1 inherit; cursor: pointer; }}
+.market-controls label span button {{ border-radius: 0 9px 9px 0; }}
 .badge {{
   display: inline-flex; align-items: center; gap: 6px;
   margin-top: 14px; padding: 5px 11px; border-radius: 980px;
@@ -482,33 +597,36 @@ svg [hidden] {{ display: none; }}
   .arrow {{ display: none; }}
   h1 {{ font-size: 32px; }}
 }}
+{THEME_CSS}
 </style>
 </head>
 <body>
+{THEME_CONTROL}
 <div class="wrap">
 
 <header>
   <h1>Grid Signal</h1>
-  <p class="sub">{html.escape(market)} electricity market · {html.escape(now.strftime('%a %d %b'))} – {html.escape(series[-1].timestamp.strftime('%a %d %b %Y'))}</p>
-  <nav><a href="/" class="on">Grid</a><a href="/simulator">Simulator</a></nav>
-  <div class="badge">MEASURED · live API data, {len(live_c)} of {len(series)} half-hours priced</div>
+  <p class="sub">{html.escape(market)} · {html.escape(location_name)} · {html.escape(range_start.strftime('%a %d %b'))} to {html.escape(series[-1].timestamp.strftime('%a %d %b %Y'))}</p>
+  <nav><a href="{html.escape(operations_href)}">Operations</a><a href="{html.escape(simulator_href)}">Fleet Lab</a><a href="{html.escape(planner_href)}">Placement Lab</a><a href="{html.escape(grid_view_href)}" class="on">Sites &amp; Grid</a><a href="/decisions">Decisions</a></nav>
+  {_market_controls(context)}
+  <div class="badge">MEASURED · {html.escape(signal_mode)} · {complete_count} of {len(series)} half-hours fully scored</div>
 </header>
 
 <section class="card">
-  <h2>Right now</h2>
+  <h2>Latest fully scored interval</h2>
   <div class="tiles">
-    {_tile("Carbon intensity", f"{carbon[0]:,.0f}" if carbon[0] is not None else "—",
-           "gCO₂/kWh · forecast", accent="--carbon")}
-    {_tile("Price", f"£{price[0]:,.2f}" if price[0] is not None else "—",
-           f"per MWh · day-ahead", accent="--price")}
-    {_tile("Cleanest ahead", f"{min(live_c):,.0f}", f"gCO₂/kWh · {(max(live_c)/min(live_c)):.1f}× spread")}
-    {_tile("Cheapest ahead", f"£{min(live_p):,.2f}", f"per MWh · {(max(live_p)/min(live_p)):.1f}× spread")}
+    {_tile("Carbon intensity", f"{current.carbon_intensity:,.0f}" if current.carbon_intensity is not None else "—",
+           "gCO₂/kWh · " + html.escape(carbon_label), accent="--carbon")}
+    {_tile("Price", f"{symbol}{current.price:,.2f}" if current.price is not None else "—",
+           "per MWh · " + html.escape(price_label), accent="--price")}
+    {_tile("Cleanest in range", f"{min(live_c):,.0f}", f"gCO₂/kWh · {_spread(live_c)}")}
+    {_tile("Cheapest in range", f"{symbol}{min(live_p):,.2f}", f"per MWh · {_spread(live_p)}")}
   </div>
 </section>
 
-{_analytics_grid(series)}
+{_analytics_grid(series, symbol)}
 
-{_regions_card()}
+{_regions_card() if context is None or context.market_key == "GB" else ""}
 
 <section class="card">
   <h2>Scheduling decision</h2>
@@ -522,17 +640,17 @@ svg [hidden] {{ display: none; }}
     <div class="slot">
       <h3>Baseline · run immediately</h3>
       <div class="when">{html.escape(baseline.start_time.strftime('%a %d %b, %H:%M'))}</div>
-      <div class="figs">£{baseline.cost:,.2f} · {baseline.carbon_kg:,.2f} kgCO₂</div>
+      <div class="figs">{symbol}{baseline.cost:,.2f} · {baseline.carbon_kg:,.2f} kgCO₂</div>
     </div>
     <div class="arrow">→</div>
     <div class="slot win">
       <h3>Scheduled · cheapest window</h3>
       <div class="when">{html.escape(scheduled.start_time.strftime('%a %d %b, %H:%M'))}</div>
-      <div class="figs">£{scheduled.cost:,.2f} · {scheduled.carbon_kg:,.2f} kgCO₂</div>
+      <div class="figs">{symbol}{scheduled.cost:,.2f} · {scheduled.carbon_kg:,.2f} kgCO₂</div>
     </div>
   </div>
   <div class="result">
-    <div><span class="k">Cost saved</span><span class="v">£{cost_cmp.cost_saved:,.2f} ({cost_cmp.cost_saved_pct:.1f}%)</span></div>
+    <div><span class="k">Cost saved</span><span class="v">{symbol}{cost_cmp.cost_saved:,.2f} ({cost_cmp.cost_saved_pct:.1f}%)</span></div>
     <div><span class="k">Carbon saved</span><span class="v">{cost_cmp.carbon_saved_g / 1000:,.2f} kg ({cost_cmp.carbon_saved_pct:.1f}%)</span></div>
     <div><span class="k">Delayed by</span><span class="v">{cost_cmp.delay_hours:g} h</span></div>
   </div>
@@ -544,14 +662,14 @@ svg [hidden] {{ display: none; }}
   <p class="note">
     The cheapest window starts {html.escape(scheduled.start_time.strftime('%H:%M'))} and the cleanest
     starts {html.escape(clean.start_time.strftime('%H:%M'))} — different half-hours, and the choice
-    is not free. Going carbon-optimal costs £{clean.cost:,.2f} against £{scheduled.cost:,.2f},
-    a £{cost_penalty:,.2f} premium to save {(scheduled.carbon_g - clean.carbon_g) / 1000:,.2f} kgCO₂.
+    is not free. Going carbon-optimal costs {symbol}{clean.cost:,.2f} against {symbol}{scheduled.cost:,.2f},
+    a {symbol}{cost_penalty:,.2f} premium to save {(scheduled.carbon_g - clean.carbon_g) / 1000:,.2f} kgCO₂.
     This is a real trade-off the scheduler must be told how to make, not one it can quietly
     resolve on its own.
   </p>
   <div class="tiles">
-    {_tile("Cost-optimal", html.escape(scheduled.start_time.strftime('%H:%M')), f"£{scheduled.cost:,.2f} · {scheduled.carbon_kg:,.2f} kgCO₂", accent="--price")}
-    {_tile("Carbon-optimal", html.escape(clean.start_time.strftime('%H:%M')), f"£{clean.cost:,.2f} · {clean.carbon_kg:,.2f} kgCO₂", accent="--carbon")}
+    {_tile("Cost-optimal", html.escape(scheduled.start_time.strftime('%H:%M')), f"{symbol}{scheduled.cost:,.2f} · {scheduled.carbon_kg:,.2f} kgCO₂", accent="--price")}
+    {_tile("Carbon-optimal", html.escape(clean.start_time.strftime('%H:%M')), f"{symbol}{clean.cost:,.2f} · {clean.carbon_kg:,.2f} kgCO₂", accent="--carbon")}
   </div>
 </section>'''}
 
@@ -568,9 +686,9 @@ svg [hidden] {{ display: none; }}
 <section class="card">
   <h2>Price</h2>
   <p class="note">Shaded span = cost-optimal window. Drag to zoom.</p>
-  {chart(ChartSeries("price", "Day-ahead price", "£/MWh",
+  {chart(ChartSeries("price", price_label, f"{symbol}/MWh",
                      [(p.timestamp, p.price) for p in series],
-                     "--price", 2, prefix="£",
+                     "--price", 2, prefix=symbol,
                      bands=[Band(scheduled.start_time, scheduled_end, "cost-optimal")]),
          height=300, default_range="1W")}
 </section>
@@ -580,22 +698,29 @@ svg [hidden] {{ display: none; }}
   <details>
     <summary>Show {len(series)} settlement periods</summary>
     <table>
-      <thead><tr><th>Period start (UTC)</th><th>gCO₂/kWh</th><th>£/MWh</th></tr></thead>
+      <thead><tr><th>Period start (UTC)</th><th>gCO₂/kWh</th><th>{symbol}/MWh</th></tr></thead>
       <tbody>{rows}</tbody>
     </table>
   </details>
 </section>
 
 <p class="foot">
-  Carbon: National Grid ESO Carbon Intensity API (forecast, not settled outturn).
-  Price: Elexon Insights Market Index Data, {html.escape(PRICE_PROVIDER_NOTE)}.
-  Both forward-looking on purpose — a scheduler deciding now cannot see settled values.
+  {html.escape(provenance)}
+  Signal mode: {html.escape(signal_mode)}.
   Generated {html.escape(generated.strftime('%Y-%m-%d %H:%M UTC'))}.
 </p>
 
 </div>
 <script>
 {EXPAND_JS}
+
+var marketSelect = document.getElementById("marketSelect");
+if (marketSelect) marketSelect.addEventListener("change", function () {{
+  var defaults = {{GB:"national",CAISO:"sp15",NYISO:"nyc"}};
+  var defaultLocation = defaults[marketSelect.value] || "national";
+  location.href = "/grid?market=" + encodeURIComponent(marketSelect.value) +
+    "&location=" + encodeURIComponent(defaultLocation);
+}});
 
 // Crosshair + tooltip. An HTML chart is interactive by default; a static
 // picture of a time series makes the reader guess at values.
