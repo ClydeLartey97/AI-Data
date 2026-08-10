@@ -151,11 +151,32 @@ def test_workload_queue_javascript_parses():
     for token in (
         "AI Data Centre Operations", "Operator control plane",
         "Demand, evidence and service state", "/api/v1/portfolio?market=",
-        "Facility power capacity", "Operator utility", "Minimum quality",
+        "Total facility capacity", "Operator utility", "Minimum quality",
         "Estimated scenario", "Plan JSON", "Schedule CSV", "Sites &amp; Grid",
+        "Generation-aware AI training", "Physical energy supply",
+        "Solar", "Wind", "Hydro", "Nuclear", "Geothermal", "Biomass",
+        "Gas", "Coal", "Oil", "Battery capacity", "Renewable match",
+        "data-inspector", "Click to expand", "Exact physical facility",
+        "Origin latitude", "Origin longitude", "Delivery loss", "Connection ID",
+        "Price: GB national", "Carbon: GB national", "30 / 30 min",
+        "Governed evidence profile", "Governed execution profiles",
+        "Compare every compatible governed profile",
+        "/api/v1/evidence/profiles", "/api/v1/evidence/probe",
+        "Immutable observations", "Runner ready", "Verify local MLX",
     ):
         assert token in html
     assert "__MARKET" not in html
+
+
+def test_operations_accepts_an_exact_caiso_pricing_node():
+    from app.workloads import render
+    html = render(_market_context("CAISO"))
+    assert "Custom CAISO pricing node" in html
+    assert 'id="customNode"' in html
+    assert 'id="loadNode"' in html
+    assert "Price: Pricing node" in html
+    assert "Carbon: CAISO balancing area" in html
+    assert "30 / 60 min" in html
 
 
 # --- structural checks that need no browser ------------------------------
@@ -224,7 +245,9 @@ def test_pages_are_linked_and_compact_panels_are_expandable():
 
     for page in (pages[0], pages[1], pages[2]):
         for token in ("pnl-close", "aria-expanded", 'event.key === "Tab"',
-                      'event.key === "Escape"', "aria-haspopup", "pnl-open"):
+                      'event.key === "Escape"', "aria-haspopup", "pnl-open",
+                      'document.body.appendChild(panel)',
+                      'placeholder.parentNode.insertBefore(closing,placeholder)'):
             assert token in page
 
 
@@ -235,7 +258,8 @@ def test_compact_charts_open_as_manipulable_workbenches():
     for token in ("pnl-workbench", "Zoom X in", "Zoom Y in", "Toggle grid",
                   "Toggle crosshair", "logarithmic Y axis", "Show exact values",
                   "Download data", "Download current chart view", "shiftKey",
-                  "setPointerCapture", "ResizeObserver", "pnl-tooltip"):
+                  "setPointerCapture", "ResizeObserver", "pnl-tooltip",
+                  ".pnl:not(.pnl-open) > .pnl-workbench"):
         assert token in page, f"compact inspector missing {token}"
 
 

@@ -22,7 +22,7 @@ border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.32);transitio
 .theme-toggle input:checked+.theme-track{background:var(--blue,var(--price))}
 .theme-toggle input:checked+.theme-track:after{transform:translateX(16px)}
 .theme-toggle input:focus-visible+.theme-track{outline:3px solid color-mix(in srgb,var(--blue,var(--price)) 35%,transparent);outline-offset:2px}
-@media(max-width:620px){.theme-control{top:10px;right:10px}.theme-control>span{display:none}}
+@media(max-width:620px){.theme-control{position:absolute;top:10px;right:10px}.theme-control>span{display:none}}
 """
 
 THEME_CONTROL = r"""<div class="theme-control" aria-label="Appearance">

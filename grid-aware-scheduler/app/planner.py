@@ -93,10 +93,12 @@ def render(context: MarketContext) -> str:
 font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
 -webkit-font-smoothing:antialiased}} .wrap{{max-width:1180px;margin:0 auto}}
 header{{padding:52px 0 26px}} h1{{font-size:40px;line-height:1.08;letter-spacing:-.025em;margin:0 0 6px}}
-.sub{{font-size:17px;color:var(--text-2);margin:0}} nav{{display:flex;gap:8px;margin-top:16px}}
-nav a{{font-size:13px;font-weight:600;text-decoration:none;padding:6px 14px;border-radius:999px;
-color:var(--text-2);background:color-mix(in srgb,var(--text) 5%,transparent)}}
-nav a.on{{background:var(--blue);color:#fff}} .card{{background:var(--card);border-radius:18px;
+.sub{{font-size:17px;color:var(--text-2);margin:0}} nav{{display:inline-flex;gap:2px;margin-top:16px;
+padding:3px;border-radius:11px;background:color-mix(in srgb,var(--text) 5%,transparent)}}
+nav a{{font-size:13px;font-weight:600;text-decoration:none;padding:6px 14px;border-radius:8px;
+color:var(--text-2);transition:background .15s ease,color .15s ease}}
+nav a:hover{{color:var(--text)}}
+nav a.on{{background:var(--card);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.10)}} .card{{background:var(--card);border-radius:18px;
 padding:22px 24px;box-shadow:var(--shadow);margin-bottom:18px}} .card h2{{font-size:20px;margin:0 0 4px}}
 .note{{color:var(--text-2);font-size:13px;margin:0 0 17px}} .controls{{display:grid;
 grid-template-columns:repeat(auto-fit,minmax(166px,1fr));gap:14px}} .ctl{{display:flex;flex-direction:column;gap:6px}}
@@ -106,8 +108,8 @@ select:focus,input:focus,button:focus-visible{{outline:3px solid color-mix(in sr
 outline-offset:1px}} .joined{{display:flex}} .joined input{{border-radius:10px 0 0 10px}}
 .joined button,.primary{{border:0;background:var(--blue);color:#fff;font:600 13px inherit;padding:0 13px;cursor:pointer}}
 .joined button{{border-radius:0 10px 10px 0}} .seg{{display:flex;background:color-mix(in srgb,var(--text) 5%,transparent);
-padding:3px;border-radius:999px}} .seg button{{flex:1;border:0;background:transparent;color:var(--text-2);
-font:600 13px inherit;padding:7px 10px;border-radius:999px;cursor:pointer}} .seg button.on{{background:var(--card);
+padding:3px;border-radius:10px}} .seg button{{flex:1;border:0;background:transparent;color:var(--text-2);
+font:600 13px inherit;padding:7px 10px;border-radius:8px;cursor:pointer}} .seg button.on{{background:var(--card);
 color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.12)}} .range-row{{display:grid;grid-template-columns:1fr 38px;
 align-items:center;gap:7px}} input[type=range]{{padding:0;border:0;accent-color:var(--blue)}} .weight{{font-size:12px;
 text-align:right;font-variant-numeric:tabular-nums}} .hide{{display:none!important}}
@@ -120,7 +122,7 @@ grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:1px;background:var(
 .tile small{{display:block;color:var(--text-2);font-size:11px}} .trace{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;
 margin-top:18px}} .step{{position:relative;padding:14px;border-radius:12px;background:color-mix(in srgb,var(--text) 4%,transparent)}}
 .step:not(:last-child)::after{{content:">";position:absolute;right:-9px;top:50%;z-index:2;color:var(--text-3)}}
-.step label{{display:block;color:var(--text-2);font-size:10px;text-transform:uppercase;letter-spacing:.08em}}
+.step label{{display:block;color:var(--text-2);font-size:11px;letter-spacing:-0.005em}}
 .step b{{display:block;font-size:14px;margin:4px 0}} .step span{{display:block;color:var(--text-2);font-size:11px}}
 .why{{margin:16px 0 0;color:var(--text-2);font-size:13px}} .why b{{color:var(--text)}}
 .grid2{{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(460px,1.2fr);gap:18px}}

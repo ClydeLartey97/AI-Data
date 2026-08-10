@@ -484,11 +484,12 @@ h1 {{
   font-weight: 700; letter-spacing: -0.022em;
 }}
 .sub {{ color: var(--text-2); font-size: 17px; margin: 0; }}
-nav {{ margin-top: 16px; display: flex; gap: 8px; }}
-nav a {{ font-size: 13px; font-weight: 550; text-decoration: none; padding: 6px 14px;
-  border-radius: 980px; color: var(--text-2);
+nav {{ margin-top: 16px; display: inline-flex; gap: 2px; padding: 3px; border-radius: 11px;
   background: color-mix(in srgb, var(--text) 5%, transparent); }}
-nav a.on {{ background: var(--price); color: #fff; }}
+nav a {{ font-size: 13px; font-weight: 550; text-decoration: none; padding: 6px 14px;
+  border-radius: 8px; color: var(--text-2); transition: background .15s ease, color .15s ease; }}
+nav a:hover {{ color: var(--text); }}
+nav a.on {{ background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.10); }}
 .market-controls {{ margin-top: 16px; display: flex; flex-wrap: wrap; gap: 9px; align-items: end; }}
 .market-controls label {{ display: flex; flex-direction: column; gap: 4px; color: var(--text-2);
   font-size: 11px; font-weight: 550; }}
@@ -527,8 +528,8 @@ nav a.on {{ background: var(--price); color: #fff; }}
 .decision {{ display: grid; grid-template-columns: 1fr auto 1fr; gap: 18px; align-items: center; }}
 .slot {{ padding: 16px 18px; border-radius: 14px; background: color-mix(in srgb, var(--text) 4%, transparent); }}
 .slot.win {{ background: color-mix(in srgb, var(--price) 10%, transparent); }}
-.slot h3 {{ margin: 0 0 8px; font-size: 13px; font-weight: 590; color: var(--text-2);
-            text-transform: uppercase; letter-spacing: 0.04em; }}
+.slot h3 {{ margin: 0 0 8px; font-size: 12.5px; font-weight: 600; color: var(--text-2);
+            letter-spacing: -0.005em; }}
 .slot .when {{ font-size: 19px; font-weight: 620; letter-spacing: -0.015em; }}
 .slot .figs {{ margin-top: 8px; font-size: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }}
 .arrow {{ color: var(--text-3); font-size: 22px; }}
@@ -585,10 +586,10 @@ svg [hidden] {{ display: none; }}
 .pnl {{ background: var(--card); border-radius: 12px; padding: 14px 16px 12px;
   box-shadow: var(--shadow); }}
 .pnl.span2 {{ grid-column: span 2; }}
-.pnl h3 {{ margin: 0 0 10px; font-size: 12px; font-weight: 660; letter-spacing: .01em;
-  text-transform: uppercase; color: var(--text-2); }}
-.pnl h3 em {{ font-style: normal; color: var(--text-3); text-transform: none;
-  font-weight: 560; letter-spacing: 0; }}
+.pnl h3 {{ margin: 0 0 10px; font-size: 13px; font-weight: 640; letter-spacing: -0.008em;
+  color: var(--text); }}
+.pnl h3 em {{ font-style: normal; color: var(--text-2);
+  font-weight: 500; letter-spacing: 0; }}
 .pnl-note {{ margin: 8px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--text-2); }}
 .pnl-note b {{ color: var(--text); font-weight: 640; font-variant-numeric: tabular-nums; }}
 @media (max-width: 760px) {{ .pnl.span2 {{ grid-column: span 1; }} }}

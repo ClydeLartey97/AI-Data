@@ -259,10 +259,12 @@ font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Ar
 header{{padding:56px 0 28px}}
 h1{{margin:0 0 6px;font-size:40px;line-height:1.08;font-weight:700;letter-spacing:-.022em}}
 .sub{{color:var(--text-2);font-size:17px;margin:0}}
-nav{{margin-top:16px;display:flex;gap:8px}}
-nav a{{font-size:13px;font-weight:550;text-decoration:none;padding:6px 14px;border-radius:980px;
-color:var(--text-2);background:color-mix(in srgb,var(--text) 5%,transparent)}}
-nav a.on{{background:var(--blue);color:#fff}}
+nav{{margin-top:16px;display:inline-flex;gap:2px;padding:3px;border-radius:11px;
+background:color-mix(in srgb,var(--text) 5%,transparent)}}
+nav a{{font-size:13px;font-weight:550;text-decoration:none;padding:6px 14px;border-radius:8px;
+color:var(--text-2);transition:background .15s ease,color .15s ease}}
+nav a:hover{{color:var(--text)}}
+nav a.on{{background:var(--card);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.10)}}
 .card{{background:var(--card);border-radius:18px;padding:22px 24px;box-shadow:var(--shadow);margin-bottom:18px}}
 .card>h2{{margin:0 0 4px;font-size:20px;font-weight:640;letter-spacing:-.015em}}
 .card>.note{{margin:0 0 18px;color:var(--text-2);font-size:14px}}
@@ -282,8 +284,8 @@ box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 22%,transparent)}}
 .joined button{{border:0;border-radius:0 10px 10px 0;background:var(--blue);color:#fff;
 font:600 12px inherit;padding:0 12px;cursor:pointer}}
 .seg{{display:inline-flex;gap:3px;background:color-mix(in srgb,var(--text) 5%,transparent);
-padding:3px;border-radius:980px}}
-.seg button{{font:inherit;font-size:13px;font-weight:550;padding:7px 16px;border:0;border-radius:980px;
+padding:3px;border-radius:10px}}
+.seg button{{font:inherit;font-size:13px;font-weight:550;padding:7px 16px;border:0;border-radius:8px;
 background:transparent;color:var(--text-2);cursor:pointer}}
 .seg button.on{{background:var(--card);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.10)}}
 .hide{{display:none}}
@@ -302,8 +304,8 @@ border-radius:5px;margin-left:6px;vertical-align:2px}}
 .prov.MEASURED{{background:color-mix(in srgb,var(--green) 14%,transparent);color:var(--green)}}
 .detected{{margin-bottom:18px;padding:12px 15px;border-radius:12px;
 background:color-mix(in srgb,var(--green) 10%,transparent);color:var(--text);font-size:13px}}
-.detected>span{{display:block;color:var(--green);font-size:10px;font-weight:750;
-letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px}}
+.detected>span{{display:block;color:var(--green);font-size:11.5px;font-weight:650;
+letter-spacing:-0.005em;margin-bottom:3px}}
 .detected small{{display:block;color:var(--text-2);margin-top:4px}}
 .warn{{margin-top:16px;padding:13px 16px;border-radius:12px;font-size:14px;
 background:color-mix(in srgb,var(--red) 10%,transparent);color:var(--red)}}

@@ -200,6 +200,7 @@ EXPAND_JS = r"""
 (function () {
   var open = null;
   var previousFocus = null;
+  var placeholder = null;
 
   function button(label, tool, title) {
     var b = document.createElement("button");
@@ -500,10 +501,14 @@ EXPAND_JS = r"""
   function closePanel() {
     if(!open)return;var closing=open;closing.classList.remove("pnl-open");closing.removeAttribute("role");closing.removeAttribute("aria-modal");
     var expand=closing.querySelector(".pnl-expand-hint");if(expand)expand.setAttribute("aria-expanded","false");
-    document.body.classList.remove("pnl-lock");open=null;if(previousFocus&&previousFocus.focus)previousFocus.focus();
+    if(placeholder&&placeholder.parentNode){placeholder.parentNode.insertBefore(closing,placeholder);placeholder.remove();}
+    else closing.remove();placeholder=null;document.body.classList.remove("pnl-lock");open=null;
+    if(previousFocus&&previousFocus.focus&&document.contains(previousFocus))previousFocus.focus();
   }
   function openPanel(panel) {
-    if(panel===open)return;closePanel();previousFocus=document.activeElement;open=panel;panel.classList.add("pnl-open");panel.setAttribute("role","dialog");panel.setAttribute("aria-modal","true");
+    if(panel===open)return;closePanel();previousFocus=document.activeElement;open=panel;
+    placeholder=document.createComment("expanded analytical panel");panel.parentNode.insertBefore(placeholder,panel);document.body.appendChild(panel);
+    panel.classList.add("pnl-open");panel.setAttribute("role","dialog");panel.setAttribute("aria-modal","true");
     var expand=panel.querySelector(".pnl-expand-hint");if(expand)expand.setAttribute("aria-expanded","true");document.body.classList.add("pnl-lock");
     var workbench=mount(panel);requestAnimationFrame(function(){if(workbench)workbench.focus();else panel.querySelector(".pnl-close").focus();});
   }
@@ -539,15 +544,15 @@ PANEL_CSS = """
   vector-effect: non-scaling-stroke; }
 
 /* Expandable analytical workbench */
-.pnl { position: relative; cursor: zoom-in; transition: box-shadow .15s ease, transform .15s ease; }
-.pnl:hover { box-shadow: 0 0 0 1px var(--sep), 0 6px 20px rgba(0,0,0,.10); }
+.pnl { position: relative; cursor: zoom-in; transition: background .15s ease, box-shadow .15s ease; }
+.pnl:hover { background: color-mix(in srgb, var(--text) 3%, var(--card)); box-shadow: inset 0 0 0 1px var(--sep); }
 .pnl-expand-hint { position: absolute; top: 10px; right: 12px; padding: 2px 7px;
-  border: 1px solid var(--sep); border-radius: 999px; color: var(--text-2);
+  border: 1px solid var(--sep); border-radius: 7px; color: var(--text-2);
   background: var(--card); font-size: 9px; font-weight: 650; letter-spacing: .04em;
   text-transform: uppercase; opacity: .76; transition: opacity .15s ease; cursor: pointer; }
 .pnl:hover .pnl-expand-hint, .pnl-expand-hint:focus-visible { opacity: 1; }
 .pnl-close { display: none; position: fixed; top: 22px; right: 25px; z-index: 11002;
-  appearance: none; border: 1px solid var(--sep); border-radius: 999px;
+  appearance: none; border: 1px solid var(--sep); border-radius: 10px;
   background: var(--card); color: var(--text); padding: 7px 12px; cursor: pointer;
   font: 600 12px/1 inherit; }
 .pnl-open { position: fixed; inset: 8px; z-index: 11000; cursor: default; overflow: hidden;
@@ -559,6 +564,7 @@ PANEL_CSS = """
   margin: 0 100px 8px 0; flex: none; color: var(--text-2); }
 .pnl-open .pnl-expand-hint { display: none; }
 .pnl-open .pnl-close { display: block; }
+.pnl:not(.pnl-open) > .pnl-workbench { display: none; }
 .pnl-workbench { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 7px; }
 .pnl-toolbar { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding-right: 85px; }
 .pnl-toolbar button, .pnl-series { appearance: none; border: 1px solid var(--sep); border-radius: 8px;
