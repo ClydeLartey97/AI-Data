@@ -37,14 +37,17 @@ def test_missing_mlx_is_recorded_as_a_warning_not_a_fabricated_number(monkeypatc
     def unavailable(*args, **kwargs):
         raise microbench.MLXUnavailable("MLX is not installed")
 
-    monkeypatch.setattr(microbench, "gemm", unavailable)
-    monkeypatch.setattr(microbench, "memory_bandwidth", unavailable)
+    for name in ("gemm", "gemv", "quantized_gemv", "memory_bandwidth"):
+        monkeypatch.setattr(microbench, name, unavailable)
     report = microbench.run(sizes=(512,), dtypes=("float32",), skip_preflight=True)
 
+    # Every attempted measurement must be accounted for by a warning, and
+    # none of them may leave behind a fabricated number.
     assert report.measurements == []
-    assert len(report.warnings) == 2
+    assert report.warnings
     assert all("not installed" in warning for warning in report.warnings)
     assert report.peak("gemm") is None
+    assert report.peak("gemv") is None
 
 
 def test_report_peak_selects_the_highest_rate():

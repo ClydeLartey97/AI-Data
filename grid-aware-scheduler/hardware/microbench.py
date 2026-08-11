@@ -128,6 +128,79 @@ def gemm(size: int, dtype_name: str, *, iterations: int = MEASURED_ITERATIONS,
     )
 
 
+def gemv(size: int, dtype_name: str, *, iterations: int = MEASURED_ITERATIONS,
+         warmup: int = WARMUP_ITERATIONS) -> Measurement:
+    """Matrix-vector product: the shape token decoding actually runs.
+
+    Decode at batch size one multiplies a single row against each weight
+    matrix, so it reads the whole matrix to do 2N^2 flops — arithmetically
+    trivial and entirely bandwidth-bound. Square GEMM is therefore the wrong
+    predictor for decode: on this hardware the two differ by a factor of
+    roughly sixty. The rate is reported as effective bandwidth for that
+    reason, with the arithmetic rate alongside it.
+    """
+    mx = _import_mlx()
+    dtype = getattr(mx, dtype_name)
+    vector = mx.random.normal((1, size)).astype(dtype)
+    matrix = mx.random.normal((size, size)).astype(dtype)
+    mx.eval(vector, matrix)
+
+    samples = _time_iterations(lambda: vector @ matrix, mx.eval, iterations, warmup)
+    median = statistics.median(samples)
+    bytes_read = size * size * matrix.dtype.size
+    return Measurement(
+        name="gemv",
+        dtype=dtype_name,
+        size=size,
+        iterations=iterations,
+        seconds_median=median,
+        seconds_relative_mad=_relative_mad(samples, median),
+        rate=bytes_read / median / 1e9,
+        rate_unit="GB/s effective",
+        notes=(f"{2.0 * size ** 2 / median / 1e9:.0f} GFLOP/s arithmetic; "
+               "bandwidth-bound, and the predictor for decode",),
+    )
+
+
+def quantized_gemv(size: int, bits: int = 4, group_size: int = 64, *,
+                   iterations: int = MEASURED_ITERATIONS,
+                   warmup: int = WARMUP_ITERATIONS) -> Measurement:
+    """GEMV against 4-bit weights — the precision the served models use.
+
+    Measuring fp16 when the deployed model is quantised describes a code path
+    inference never takes.
+    """
+    mx = _import_mlx()
+    vector = mx.random.normal((1, size)).astype(mx.float16)
+    matrix = mx.random.normal((size, size)).astype(mx.float16)
+    weights, scales, biases = mx.quantize(matrix, group_size=group_size, bits=bits)
+    mx.eval(vector, weights, scales, biases)
+
+    def operation():
+        return mx.quantized_matmul(vector, weights, scales, biases,
+                                   transpose=False, group_size=group_size,
+                                   bits=bits)
+
+    samples = _time_iterations(operation, mx.eval, iterations, warmup)
+    median = statistics.median(samples)
+    bytes_read = size * size * bits / 8
+    return Measurement(
+        name="quantized_gemv",
+        dtype=f"int{bits}",
+        size=size,
+        iterations=iterations,
+        seconds_median=median,
+        seconds_relative_mad=_relative_mad(samples, median),
+        rate=bytes_read / median / 1e9,
+        rate_unit="GB/s effective",
+        notes=(f"{bits}-bit weights, group size {group_size}. Effective GB/s "
+               "reads lower than fp16 because dequantisation costs compute, "
+               "yet the operation is faster in wall clock since it moves a "
+               "quarter of the bytes — compare elapsed time, never GB/s, "
+               "across precisions",),
+    )
+
+
 def memory_bandwidth(elements: int = DEFAULT_BANDWIDTH_ELEMENTS,
                      dtype_name: str = "float32", *,
                      iterations: int = MEASURED_ITERATIONS,
@@ -189,6 +262,22 @@ def run(*, sizes=DEFAULT_GEMM_SIZES, dtypes=DEFAULT_DTYPES,
                     gemm(size, dtype_name, iterations=iterations))
             except (MLXUnavailable, ValueError, RuntimeError) as exc:
                 report.warnings.append(f"gemm {dtype_name} {size}: {exc}")
+
+    # Decode-shaped work. Larger matrices than the GEMM sweep, because a
+    # matrix-vector product allocates one matrix rather than three.
+    for dtype_name in ("float16", "bfloat16"):
+        for size in (2048, 4096):
+            try:
+                report.measurements.append(
+                    gemv(size, dtype_name, iterations=iterations))
+            except (MLXUnavailable, ValueError, RuntimeError) as exc:
+                report.warnings.append(f"gemv {dtype_name} {size}: {exc}")
+    for size in (2048, 4096):
+        try:
+            report.measurements.append(
+                quantized_gemv(size, iterations=iterations))
+        except (MLXUnavailable, ValueError, RuntimeError, TypeError) as exc:
+            report.warnings.append(f"quantized gemv {size}: {exc}")
     try:
         report.measurements.append(
             memory_bandwidth(bandwidth_elements, iterations=iterations))
@@ -214,7 +303,8 @@ def main() -> None:
     for measurement in report.measurements:
         print(f"{measurement.name:>17} {measurement.dtype:>9} "
               f"{measurement.size:>9} : {measurement.rate:9.1f} "
-              f"{measurement.rate_unit:<12} "
+              f"{measurement.rate_unit:<16} "
+              f"{measurement.seconds_median * 1e6:9.0f} us "
               f"(+/-{measurement.seconds_relative_mad * 100:.1f}%)")
     for warning in report.warnings:
         print(f"  warning: {warning}")
