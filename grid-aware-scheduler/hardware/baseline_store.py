@@ -146,6 +146,10 @@ def baseline(device: str, *, path: Path | None = None,
         ("gemm_fp32_gflops", "gemm", "float32"),
         ("gemm_fp16_gflops", "gemm", "float16"),
         ("memory_bandwidth_gbs", "memory_bandwidth", None),
+        # Model-level rates, which are workload throughput rather than a
+        # ceiling; they are reported separately and never averaged together.
+        ("prefill_tokens_per_second", "prefill", None),
+        ("decode_tokens_per_second", "decode", None),
     ):
         values = [value for value in
                   (_rate(run, name, dtype) for run in runs) if value is not None]

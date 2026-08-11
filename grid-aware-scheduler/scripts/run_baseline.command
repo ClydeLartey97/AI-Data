@@ -66,6 +66,20 @@ for i in $(seq 1 "$RUNS"); do
   echo
 done
 
+if [ "${SKIP_INFERENCE:-0}" != "1" ]; then
+  echo "── model throughput: prefill and decode ──"
+  echo "  (set SKIP_INFERENCE=1 to leave this out)"
+  for i in $(seq 1 "$RUNS"); do
+    echo "  inference run $i of $RUNS"
+    if ! "$PYTHON" -m hardware.inference_bench --store; then
+      echo "  inference run $i was refused or failed"
+      failed=$((failed + 1))
+    fi
+    [ "$i" -lt "$RUNS" ] && sleep 30
+  done
+  echo
+fi
+
 echo "──────────────────────────────────────────────────────────────"
 "$PYTHON" - <<'PY'
 from hardware import baseline_store
