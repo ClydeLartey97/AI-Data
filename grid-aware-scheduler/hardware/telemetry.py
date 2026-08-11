@@ -174,6 +174,51 @@ class TelemetryCollector:
             })
         return devices, []
 
+    def battery(self) -> dict:
+        """Battery charge state, and the power source the host is running on.
+
+        Two separate uses. Power source is run context: macOS behaves
+        differently on battery, so a benchmark that does not record it is not
+        reproducible. Charge and voltage additionally allow device-input
+        energy to be integrated across a run, but only while genuinely
+        discharging — a charging battery is gaining energy from the wall and
+        the difference means nothing.
+        """
+        if self.platform_name != "Darwin":
+            return {"available": False, "reason": "not macOS"}
+        try:
+            output = self._run(["ioreg", "-rn", "AppleSmartBattery"], timeout=3.0)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"available": False, "reason": f"ioreg unavailable: {exc}"}
+        values: dict[str, float] = {}
+        for key in ("AppleRawCurrentCapacity", "AppleRawMaxCapacity",
+                    "Voltage", "CycleCount", "Temperature"):
+            match = re.search(rf'"{key}"\s*=\s*(\d+)', output)
+            if match:
+                values[key] = float(match.group(1))
+        external = re.search(r'"ExternalConnected"\s*=\s*(Yes|No)', output)
+        charging = re.search(r'"IsCharging"\s*=\s*(Yes|No)', output)
+        capacity_mah = values.get("AppleRawCurrentCapacity")
+        voltage_mv = values.get("Voltage")
+        on_ac = external.group(1) == "Yes" if external else None
+        is_charging = charging.group(1) == "Yes" if charging else None
+        return _drop_none({
+            "available": True,
+            "on_ac_power": on_ac,
+            "is_charging": is_charging,
+            # Energy integration is only meaningful while discharging.
+            "energy_integration_possible": (on_ac is False and is_charging is False),
+            "charge_mah": capacity_mah,
+            "full_charge_mah": values.get("AppleRawMaxCapacity"),
+            "voltage_v": _round(voltage_mv / 1000) if voltage_mv else None,
+            "energy_remaining_wh": (
+                _round(capacity_mah * voltage_mv / 1_000_000, 3)
+                if None not in (capacity_mah, voltage_mv) else None),
+            "cycle_count": values.get("CycleCount"),
+            "temperature_c": (_round(values["Temperature"] / 100, 1)
+                              if "Temperature" in values else None),
+        })
+
     def snapshot(self) -> dict:
         """One complete reading. Safe to call on a timer."""
         warnings: list[str] = []
