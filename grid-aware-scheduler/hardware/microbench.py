@@ -205,6 +205,8 @@ def main() -> None:
     parser.add_argument("--sizes", type=int, nargs="+", default=list(DEFAULT_GEMM_SIZES))
     parser.add_argument("--skip-preflight", action="store_true",
                         help="record the run as unvalidated; use only for diagnosis")
+    parser.add_argument("--store", action="store_true",
+                        help="append this run to the local baseline history")
     args = parser.parse_args()
 
     report = run(sizes=tuple(args.sizes), iterations=args.iterations,
@@ -216,6 +218,19 @@ def main() -> None:
               f"(+/-{measurement.seconds_relative_mad * 100:.1f}%)")
     for warning in report.warnings:
         print(f"  warning: {warning}")
+
+    if args.store:
+        from hardware import baseline_store
+        run_id = baseline_store.record_run(report.as_dict())
+        state = baseline_store.baseline(report.device)
+        print(f"\nStored run {run_id}"
+              + ("" if args.skip_preflight else " (preflight validated)"))
+        if state["established"]:
+            for label, values in state["metrics"].items():
+                print(f"  baseline {label}: {values['median']} "
+                      f"(spread {values['spread_percent']}% over {values['samples']} runs)")
+        else:
+            print(f"  no baseline yet: {state['reason']}")
     if args.output:
         args.output.write_text(json.dumps(report.as_dict(), indent=2) + "\n",
                                encoding="utf-8")
