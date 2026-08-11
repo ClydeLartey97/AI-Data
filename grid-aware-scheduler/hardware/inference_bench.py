@@ -231,6 +231,9 @@ def main() -> None:
     parser.add_argument("--generation-tokens", type=int,
                         default=DEFAULT_GENERATION_TOKENS)
     parser.add_argument("--skip-preflight", action="store_true")
+    parser.add_argument("--min-free-memory-gb", type=float, default=3.0,
+                        help="headroom required; a smaller model needs less, "
+                             "but weights must not be paged during a run")
     parser.add_argument("--store", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
@@ -238,7 +241,8 @@ def main() -> None:
     report = run(model_id=args.model, revision=args.revision,
                  prompt_lengths=tuple(args.prompt_tokens),
                  generation_tokens=args.generation_tokens,
-                 skip_preflight=args.skip_preflight)
+                 skip_preflight=args.skip_preflight,
+                 min_free_memory_gb=args.min_free_memory_gb)
 
     print(f"{report.model_id}  ({report.device})")
     for item in report.runs:

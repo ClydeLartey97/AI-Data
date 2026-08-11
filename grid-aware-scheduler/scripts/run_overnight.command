@@ -21,18 +21,23 @@ LOG="$PROJECT/grid-aware-scheduler/data/cache/campaign-$STAMP.log"
 APPS=("Visual Studio Code" "Google Chrome" "Arc" "Claude")
 
 # Phase length x operations x repeats, plus cool-down between each.
-PHASE_MINUTES=${PHASE_MINUTES:-25}
+# 45 minutes is long enough for a fanless part to reach a genuine steady
+# state rather than a still-cooling one; two repeats then establish that the
+# curve is reproducible rather than one night's weather.
+PHASE_MINUTES=${PHASE_MINUTES:-45}
 COOLDOWN_MINUTES=${COOLDOWN_MINUTES:-8}
-REPEATS=${REPEATS:-3}
+REPEATS=${REPEATS:-2}
+OPERATIONS=3
 
 cd "$PROJECT/grid-aware-scheduler" || { echo "Project folder not found"; exit 1; }
 
-TOTAL=$(echo "($PHASE_MINUTES + $COOLDOWN_MINUTES) * 2 * $REPEATS" | bc)
+TOTAL=$(echo "($PHASE_MINUTES + $COOLDOWN_MINUTES) * $OPERATIONS * $REPEATS" | bc)
 echo "──────────────────────────────────────────────────────────────"
 echo " Overnight sustained characterisation"
 echo "──────────────────────────────────────────────────────────────"
 echo
-echo " Phases:    2 operations x $REPEATS repeats at ${PHASE_MINUTES} min each"
+echo " Phases:    $OPERATIONS operations x $REPEATS repeats at ${PHASE_MINUTES} min each"
+echo "            compute ceiling (GEMM), decode shape (GEMV), real decode"
 echo " Cooldown:  ${COOLDOWN_MINUTES} min between phases"
 echo " Estimated: about $TOTAL minutes (~$(echo "scale=1; $TOTAL/60" | bc) hours)"
 echo " Output:    $OUT"
@@ -40,7 +45,12 @@ echo
 echo " This will quit: ${APPS[*]}"
 echo " Keep the machine on mains power for the whole run."
 echo
-read -r -p "Press return to start, or Ctrl-C to cancel. " _
+if [ "${ASSUME_YES:-0}" != "1" ]; then
+  read -r -p "Press return to start, or Ctrl-C to cancel. " _
+else
+  echo "Starting automatically (ASSUME_YES=1); 10 seconds to cancel with Ctrl-C…"
+  sleep 10
+fi
 
 for app in "${APPS[@]}"; do
   if osascript -e "application \"$app\" is running" 2>/dev/null | grep -q true; then

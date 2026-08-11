@@ -112,20 +112,53 @@ def _operation(name: str, dtype: str, size: int):
         read = size * size * matrix.dtype.size
         return (lambda: vector @ matrix, mx.eval,
                 lambda seconds: read / seconds / 1e9, "GB/s effective")
+    if name == "decode":
+        # Real token generation, sustained. This is the phase that tests the
+        # roofline prediction: if decode holds near weight-bytes / bandwidth,
+        # the model predicts devices instead of merely describing them.
+        from mlx_lm import stream_generate
+
+        from hardware.inference_bench import DEFAULT_MODEL, _fixed_prompt, _load
+
+        model, tokenizer = _load(DEFAULT_MODEL, None)
+        prompt = _fixed_prompt(tokenizer, 128)
+
+        def generate():
+            produced = 0
+            for response in stream_generate(model, tokenizer, prompt,
+                                            max_tokens=size):
+                produced = response.generation_tokens
+            return produced
+
+        # Generation is eager, so there is nothing further to force.
+        return (generate, lambda value: value,
+                lambda seconds: size / seconds, "tokens/s decode")
     raise ValueError(f"unknown sustained operation {name!r}")
 
 
 def run_phase(name: str, operation: str, dtype: str, size: int, *,
               minutes: float, sample_seconds: float,
               collector: TelemetryCollector,
+              setup_budget_seconds: float = 300.0,
               on_sample=None) -> Phase:
     """Drive one operation continuously, sampling the achieved rate."""
+    setup_started = time.perf_counter()
     work, evaluate, to_rate, unit = _operation(operation, dtype, size)
     phase = Phase(name=name, operation=operation, dtype=dtype, size=size,
                   started_at=datetime.now(timezone.utc).isoformat())
+    phase.notes.append(f"setup took {time.perf_counter() - setup_started:.1f}s")
 
+    # A single work unit that cannot complete inside the sampling interval by
+    # a wide margin means the host is paging rather than computing. Abandon
+    # the phase instead of consuming the whole night producing nothing.
+    warmup_budget = max(setup_budget_seconds, sample_seconds * 20)
+    warmup_started = time.perf_counter()
     for _ in range(microbench.WARMUP_ITERATIONS):
         evaluate(work())
+        if time.perf_counter() - warmup_started > warmup_budget:
+            raise TimeoutError(
+                f"warm-up exceeded {warmup_budget:.0f}s; the host is unable to "
+                "run this phase at a usable rate")
 
     started = time.perf_counter()
     deadline = started + minutes * 60.0
@@ -193,14 +226,25 @@ def run(*, output: Path, phase_minutes: float = DEFAULT_PHASE_MINUTES,
                           encoding="utf-8")
 
     persist()
-    plan = [
+    # Proven synthetic phases run first and complete all their repeats before
+    # the model-backed phase is attempted. Real decode needs weights resident,
+    # so it is the phase most likely to be defeated by a busy host; ordering it
+    # last means a failure there cannot cost the work already scheduled.
+    proven = [
         ("sustained_gemm_fp16", "gemm", "float16", 2048),
         ("sustained_gemv_fp16", "gemv", "float16", 4096),
     ]
-    for repeat in range(1, repeats + 1):
-        for name, operation, dtype, size in plan:
-            label = f"{name}_repeat{repeat}"
-            print(f"[{datetime.now():%H:%M:%S}] {label}: {phase_minutes:g} min")
+    model_backed = [("sustained_decode", "decode", "int4", 64)]
+    schedule = [
+        (f"{name}_repeat{repeat}", operation, dtype, size)
+        for group in (proven, model_backed)
+        for repeat in range(1, repeats + 1)
+        for name, operation, dtype, size in group
+    ]
+
+    for label, operation, dtype, size in schedule:
+            print(f"[{datetime.now():%H:%M:%S}] {label}: {phase_minutes:g} min",
+                  flush=True)
             try:
                 phase = run_phase(
                     label, operation, dtype, size, minutes=phase_minutes,
@@ -208,6 +252,7 @@ def run(*, output: Path, phase_minutes: float = DEFAULT_PHASE_MINUTES,
                     on_sample=lambda p, s: persist())
             except Exception as exc:
                 campaign["warnings"].append(f"{label}: {exc}")
+                print(f"    skipped: {exc}", flush=True)
                 persist()
                 continue
             campaign["phases"].append(asdict(phase))
