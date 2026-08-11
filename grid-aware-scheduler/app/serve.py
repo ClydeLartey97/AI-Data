@@ -40,7 +40,7 @@ from core import audit_store, evidence_store
 from core.grid import Job
 from hardware.providers import LocalDetector, RedfishFleetProvider
 from hardware.calibration import load_profiles
-from hardware import apple_benchmark, inventory_store
+from hardware import apple_benchmark, inventory_store, telemetry
 from hardware.reference_language import catalogue_entry
 
 #: Market signals move on a half-hour boundary, so anything fresher than this
@@ -56,6 +56,17 @@ DISCOVERY_CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "discover
 def _discovery_config_path() -> Path:
     override = os.environ.get("DISCOVERY_CONFIG")
     return Path(override) if override else DISCOVERY_CONFIG_PATH
+
+
+#: One shared collector so CPU percentages are real deltas between ticks
+#: rather than each request blocking to sample its own interval.
+TELEMETRY = telemetry.TelemetryCollector()
+
+#: A stream is capped rather than left open forever; the browser's EventSource
+#: reconnects on its own, so no thread outlives its usefulness.
+TELEMETRY_STREAM_SECONDS = 600.0
+TELEMETRY_MIN_INTERVAL = 0.5
+TELEMETRY_MAX_INTERVAL = 30.0
 
 
 class _Cache:
@@ -178,6 +189,45 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
             ).encode("utf-8")
             self._send(body, status, "application/json; charset=utf-8")
 
+        def _stream_telemetry(self, query: dict[str, list[str]]) -> None:
+            """Push a reading every interval over Server-Sent Events.
+
+            Deliberately not a Content-Length response: the point is that the
+            page updates without being reloaded. The stream is capped, and the
+            browser's EventSource reconnects by itself when it ends.
+            """
+            try:
+                interval = float(query.get("interval", ["2"])[0])
+            except (TypeError, ValueError):
+                interval = 2.0
+            interval = min(max(interval, TELEMETRY_MIN_INTERVAL),
+                           TELEMETRY_MAX_INTERVAL)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            deadline = time.monotonic() + TELEMETRY_STREAM_SECONDS
+            try:
+                while time.monotonic() < deadline:
+                    payload = json.dumps(TELEMETRY.snapshot(),
+                                         ensure_ascii=False, allow_nan=False)
+                    self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    time.sleep(interval)
+            except (BrokenPipeError, ConnectionResetError):
+                # The tab closed or navigated away. Normal, not an error.
+                pass
+            except Exception as exc:  # a failing sensor must not kill the loop
+                try:
+                    error = json.dumps({"error": str(exc)})
+                    self.wfile.write(f"event: error\ndata: {error}\n\n".encode())
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ValueError):
+                    pass
+
         @staticmethod
         def _market_location(query: dict[str, list[str]]) -> tuple[str, str]:
             market = query.get("market", ["GB"])[0].upper()
@@ -207,6 +257,15 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                     "sites": sites,
                     "refreshing": refreshing,
                 })
+                return
+            if path == "/api/v1/telemetry":
+                self._send_json({
+                    "api_version": api.API_VERSION,
+                    "telemetry": TELEMETRY.snapshot(),
+                })
+                return
+            if path == "/api/v1/telemetry/stream":
+                self._stream_telemetry(query)
                 return
             if path == "/api/v1/inventory":
                 try:

@@ -276,6 +276,49 @@ def test_evidence_endpoints_build_an_immutable_measured_profile(local_server):
     assert registry["collectors"][0]["status"] == "runner_ready"
 
 
+def test_telemetry_snapshot_endpoint_reports_occupancy(local_server):
+    _, payload = _json(f"{local_server}/api/v1/telemetry")
+    telemetry = payload["telemetry"]
+    assert telemetry["measurement_scope"] == "occupancy"
+    assert telemetry["devices"][0]["id"] == "local-host"
+
+
+def test_telemetry_stream_pushes_repeated_readings_without_a_reload(local_server):
+    """The point of the feature: two readings arrive on one connection."""
+    request = urllib.request.Request(
+        f"{local_server}/api/v1/telemetry/stream?interval=0.5")
+    events, deadline = [], time.monotonic() + 15
+    with urllib.request.urlopen(request, timeout=15) as response:
+        assert response.headers["Content-Type"].startswith("text/event-stream")
+        assert response.headers["Cache-Control"] == "no-store"
+        while len(events) < 2 and time.monotonic() < deadline:
+            line = response.readline().decode()
+            if line.startswith("data: "):
+                events.append(json.loads(line[len("data: "):]))
+
+    assert len(events) == 2
+    assert events[0]["observed_at"] != events[1]["observed_at"]
+    assert all(event["devices"][0]["id"] == "local-host" for event in events)
+
+
+def test_telemetry_stream_interval_is_clamped(local_server):
+    # An absurd interval must not spin the server or hang the client.
+    request = urllib.request.Request(
+        f"{local_server}/api/v1/telemetry/stream?interval=-99")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        started = time.monotonic()
+        first = second = None
+        while second is None and time.monotonic() - started < 8:
+            line = response.readline().decode()
+            if line.startswith("data: "):
+                if first is None:
+                    first = time.monotonic()
+                else:
+                    second = time.monotonic()
+    assert second is not None
+    assert second - first >= 0.4  # clamped up to the 0.5s floor
+
+
 class _RedfishFixtureHandler(BaseHTTPRequestHandler):
     """Serve the pruned DMTF mockup tree the way a BMC would: the service
     root anonymous, everything deeper requiring an Authorization header."""

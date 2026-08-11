@@ -22,6 +22,21 @@ version is `0.12.0`; the contract remains `v1`.
 | `POST` | `/api/v1/decisions/{id}/score` | Score the fixed decision on realised points |
 | `GET` | `/api/v1/inventory` | Latest facility discovery snapshot, store summary and whether discovery is configured |
 | `POST` | `/api/v1/inventory/refresh` | Walk the declared Redfish endpoints read-only and record one snapshot |
+| `GET` | `/api/v1/telemetry` | One live host occupancy reading |
+| `GET` | `/api/v1/telemetry/stream?interval=2` | Server-Sent Events; one reading per interval on a single connection |
+
+Telemetry reports **occupancy, not performance**: available memory, storage
+headroom, CPU and accelerator busy percentages, and accelerator memory in use.
+These are read from the operating system without privilege — `psutil`,
+`ioreg` on Apple silicon, `nvidia-smi` where present — and are `MEASURED`.
+They never promote throughput or a power curve, which still require the
+repeated calibration runs described in `docs/calibration.md`. An unavailable
+source is reported in `warnings` rather than guessed.
+
+The stream is capped at ten minutes and its interval clamped to 0.5–30
+seconds; browsers reconnect automatically via `EventSource`. Note that an
+open stream keeps the connection active, so automated page capture should use
+the one-shot endpoint instead of waiting for network idle.
 
 Discovery endpoints are declared in `data/discovery.json` (schema
 `facility-discovery-v1`, see `docs/discovery.md`; override the path with the
