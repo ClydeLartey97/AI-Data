@@ -191,7 +191,7 @@ def render(devices: dict, models: dict, grid: dict, sites: dict,
       <option value="GB"{" selected" if market_key == "GB" else ""}>Great Britain</option>
       <optgroup label="United States">
         <option value="CAISO"{" selected" if market_key == "CAISO" else ""}>California ISO</option>
-        <option value="NYISO"{" selected" if market_key == "NYISO" else ""}>New York ISO</option>
+        <option value="NYISO"{" selected" if market_key == "NYISO" else ""}>New York ISO</option><option value="MISO"{" selected" if market_key == "MISO" else ""}>Midcontinent ISO</option>
       </optgroup>
     </select></div>
     <div class="ctl"><label for="gridLocation">Grid location</label>

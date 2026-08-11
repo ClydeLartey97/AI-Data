@@ -6,7 +6,8 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +15,9 @@ from adapters.base_adapter import GridDataPoint
 from app import serve
 from app.markets import MarketContext, market_locations
 from core.grid import Job
+from hardware import providers
+
+REDFISH_FIXTURES = Path(__file__).parent / "fixtures" / "redfish"
 
 
 def _context() -> MarketContext:
@@ -32,6 +36,9 @@ def local_server(monkeypatch, tmp_path):
     monkeypatch.setattr(serve, "load_market", lambda *args, **kwargs: _context())
     monkeypatch.setattr(serve.audit_store, "DB_PATH", tmp_path / "audit.sqlite")
     monkeypatch.setattr(serve.evidence_store, "DB_PATH", tmp_path / "evidence.sqlite")
+    monkeypatch.setattr(serve.inventory_store, "DB_PATH", tmp_path / "inventory.sqlite")
+    monkeypatch.setattr(providers, "DEFAULT_SITE_KEY_PATH", tmp_path / "site-key")
+    monkeypatch.setenv("DISCOVERY_CONFIG", str(tmp_path / "discovery.json"))
     monkeypatch.setattr(serve.apple_benchmark, "run_mlx_probe", lambda *args: {
         "operations_per_second": 123456,
         "performance_provenance": "MEASURED",
@@ -267,3 +274,99 @@ def test_evidence_endpoints_build_an_immutable_measured_profile(local_server):
     assert registry["profiles"][0]["cross_device_comparable"] is False
     assert registry["collectors"][0]["benchmark_id"] == "mlx-language-mcq-v1"
     assert registry["collectors"][0]["status"] == "runner_ready"
+
+
+class _RedfishFixtureHandler(BaseHTTPRequestHandler):
+    """Serve the pruned DMTF mockup tree the way a BMC would: the service
+    root anonymous, everything deeper requiring an Authorization header."""
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):  # noqa: N802 - stdlib naming
+        path = self.path.split("?")[0]
+        if not path.startswith("/redfish/v1"):
+            return self._reply(404, b"{}")
+        relative = path[len("/redfish/v1"):].strip("/")
+        if relative and "Authorization" not in self.headers:
+            return self._reply(401, b'{"error": "authentication required"}')
+        target = (REDFISH_FIXTURES / relative / "index.json") if relative \
+            else (REDFISH_FIXTURES / "index.json")
+        if not target.is_file():
+            return self._reply(404, b"{}")
+        self._reply(200, target.read_bytes())
+
+    def _reply(self, status: int, body: bytes) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@pytest.fixture
+def redfish_fixture_server():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _RedfishFixtureHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_port
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_inventory_endpoint_is_honest_when_unconfigured(local_server):
+    _, payload = _json(f"{local_server}/api/v1/inventory")
+    assert payload["configured"] is False
+    assert payload["snapshot"] is None
+    assert payload["summary"]["snapshot_count"] == 0
+
+
+def test_inventory_refresh_without_config_conflicts(local_server):
+    request = urllib.request.Request(
+        f"{local_server}/api/v1/inventory/refresh",
+        data=b"{}", headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        _json(request)
+    assert excinfo.value.code == 409
+    assert "no discovery configuration" in json.loads(excinfo.value.read())["error"]
+
+
+def test_inventory_refresh_walks_real_loopback_redfish(
+        local_server, redfish_fixture_server, tmp_path, monkeypatch):
+    monkeypatch.setenv("REDFISH_SERVER_TEST_CRED", "reader:secret")
+    (tmp_path / "discovery.json").write_text(json.dumps({
+        "schema": "facility-discovery-v1",
+        "endpoints": [{
+            "protocol": "redfish", "host": "127.0.0.1",
+            "port": redfish_fixture_server, "tls": False,
+            "credential_env": "REDFISH_SERVER_TEST_CRED",
+        }],
+    }), encoding="utf-8")
+
+    request = urllib.request.Request(
+        f"{local_server}/api/v1/inventory/refresh",
+        data=b"{}", headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    response, created = _json(request)
+    assert response.status == 201
+    names = {device["name"] for device in created["snapshot"]["devices"]}
+    assert names == {"Contoso 3500", "Stratix 10"}
+    assert created["snapshot"]["warnings"] == []
+
+    inventory_response, payload = _json(f"{local_server}/api/v1/inventory")
+    assert payload["configured"] is True
+    assert payload["snapshot"]["snapshot_id"] == created["snapshot_id"]
+    assert payload["summary"]["latest_device_count"] == 2
+
+    # The provider's identifier hygiene must survive the whole HTTP pipe:
+    # no raw serial, UUID fragment, SKU, asset tag or credential.
+    raw = json.dumps(payload)
+    for leak in ("437XR1138R2", "38947555", "8675309",
+                 "Chicago-45Z-2381", "secret"):
+        assert leak not in raw

@@ -26,6 +26,9 @@ env/
 # cached market data pulled from live APIs — re-fetchable, don't track
 **/data/cache/
 **/data/calibration/profiles.json
+# local facility-discovery endpoint declarations (docs/discovery.md) —
+# operator-specific addresses, never shared
+**/data/discovery.json
 *.sqlite
 *.db
 *.parquet

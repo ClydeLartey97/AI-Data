@@ -201,7 +201,7 @@ def _market_controls(context: "MarketContext | None") -> str:
     <option value="GB"{" selected" if context.market_key == "GB" else ""}>Great Britain</option>
     <optgroup label="United States">
       <option value="CAISO"{" selected" if context.market_key == "CAISO" else ""}>California ISO</option>
-      <option value="NYISO"{" selected" if context.market_key == "NYISO" else ""}>New York ISO</option>
+      <option value="NYISO"{" selected" if context.market_key == "NYISO" else ""}>New York ISO</option><option value="MISO"{" selected" if context.market_key == "MISO" else ""}>Midcontinent ISO</option>
     </optgroup>
   </select></label>
   <label>Grid location <select name="location">{options}</select></label>

@@ -20,6 +20,15 @@ version is `0.12.0`; the contract remains `v1`.
 | `GET` | `/api/v1/decisions` | Recent persisted decisions |
 | `GET` | `/api/v1/decisions/{id}` | Exact request, response, signals and realised score |
 | `POST` | `/api/v1/decisions/{id}/score` | Score the fixed decision on realised points |
+| `GET` | `/api/v1/inventory` | Latest facility discovery snapshot, store summary and whether discovery is configured |
+| `POST` | `/api/v1/inventory/refresh` | Walk the declared Redfish endpoints read-only and record one snapshot |
+
+Discovery endpoints are declared in `data/discovery.json` (schema
+`facility-discovery-v1`, see `docs/discovery.md`; override the path with the
+`DISCOVERY_CONFIG` environment variable). Refresh returns `409` when no
+configuration exists, `201` with the recorded snapshot when the walk ran.
+Snapshots are append-only and contain keyed device digests, never raw
+serial numbers, UUIDs or credentials.
 
 The operator interface at `/decisions` consumes these endpoints. It can be
 opened even when a market-data provider is unavailable because the journal is

@@ -26,25 +26,36 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from app import api, dashboard, decisions, planner, simulator, workloads
 from app.markets import load_market, summarise_market
 from core import audit_store, evidence_store
 from core.grid import Job
-from hardware.providers import LocalDetector
+from hardware.providers import LocalDetector, RedfishFleetProvider
 from hardware.calibration import load_profiles
-from hardware import apple_benchmark
+from hardware import apple_benchmark, inventory_store
 from hardware.reference_language import catalogue_entry
 
 #: Market signals move on a half-hour boundary, so anything fresher than this
 #: is the same answer with extra network calls attached.
 CACHE_SECONDS = 300
 SITE_CACHE_SECONDS = 1800
+
+#: Facility discovery configuration (docs/discovery.md). Local operator
+#: config, never committed; overridable for tests and alternate deployments.
+DISCOVERY_CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "discovery.json"
+
+
+def _discovery_config_path() -> Path:
+    override = os.environ.get("DISCOVERY_CONFIG")
+    return Path(override) if override else DISCOVERY_CONFIG_PATH
 
 
 class _Cache:
@@ -170,7 +181,7 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
         @staticmethod
         def _market_location(query: dict[str, list[str]]) -> tuple[str, str]:
             market = query.get("market", ["GB"])[0].upper()
-            default_location = {"CAISO": "sp15", "NYISO": "nyc"}.get(
+            default_location = {"CAISO": "sp15", "NYISO": "nyc", "MISO": "indiana"}.get(
                 market, "national"
             )
             custom_node = query.get("custom_node", [""])[0].strip()
@@ -196,6 +207,18 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                     "sites": sites,
                     "refreshing": refreshing,
                 })
+                return
+            if path == "/api/v1/inventory":
+                try:
+                    self._send_json({
+                        "api_version": api.API_VERSION,
+                        "product_version": api.PRODUCT_VERSION,
+                        "configured": _discovery_config_path().exists(),
+                        "summary": inventory_store.summary(),
+                        "snapshot": inventory_store.latest(),
+                    })
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, 400)
                 return
             if path == "/api/v1/evidence/profiles":
                 try:
@@ -307,9 +330,10 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
             is_portfolio = path == "/api/v1/portfolio"
             is_evidence = path == "/api/v1/evidence/observations"
             is_evidence_probe = path == "/api/v1/evidence/probe"
+            is_inventory_refresh = path == "/api/v1/inventory/refresh"
             if (path != "/api/v1/plan" and not is_portfolio
                     and not is_score and not is_evidence
-                    and not is_evidence_probe):
+                    and not is_evidence_probe and not is_inventory_refresh):
                 self.send_error(404, "Not found")
                 return
             if not self.headers.get("Content-Type", "").lower().startswith("application/json"):
@@ -325,6 +349,27 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                 return
             try:
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                if is_inventory_refresh:
+                    if not isinstance(payload, dict):
+                        raise ValueError("refresh request must be an object")
+                    config = _discovery_config_path()
+                    if not config.exists():
+                        self._send_json({
+                            "error": f"no discovery configuration at {config}; "
+                                     "declare read-only endpoints per docs/discovery.md",
+                        }, 409)
+                        return
+                    result = RedfishFleetProvider.from_config(config).detect()
+                    snapshot = result.public_dict()
+                    snapshot_id = inventory_store.record_snapshot(snapshot)
+                    self._send_json({
+                        "api_version": api.API_VERSION,
+                        "product_version": api.PRODUCT_VERSION,
+                        "snapshot_id": snapshot_id,
+                        "snapshot": snapshot,
+                        "summary": inventory_store.summary(),
+                    }, 201)
+                    return
                 if is_evidence_probe:
                     if not isinstance(payload, dict):
                         raise ValueError("probe request must be an object")
@@ -363,7 +408,7 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                 query = parse_qs(request.query)
                 if isinstance(payload, dict):
                     query.setdefault("market", [str(payload.get("market", "GB"))])
-                    default = {"CAISO": "sp15", "NYISO": "nyc"}.get(
+                    default = {"CAISO": "sp15", "NYISO": "nyc", "MISO": "indiana"}.get(
                         str(payload.get("market", "GB")).upper(), "national"
                     )
                     query.setdefault("location", [str(payload.get("location", default))])
