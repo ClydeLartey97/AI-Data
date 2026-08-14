@@ -40,7 +40,7 @@ from core import audit_store, evidence_store
 from core.grid import Job
 from hardware.providers import LocalDetector, RedfishFleetProvider
 from hardware.calibration import load_profiles
-from hardware import apple_benchmark, inventory_store, telemetry
+from hardware import apple_benchmark, inventory_store, scan as hardware_scan, telemetry
 from hardware.reference_language import catalogue_entry
 
 #: Market signals move on a half-hour boundary, so anything fresher than this
@@ -257,6 +257,17 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                     "sites": sites,
                     "refreshing": refreshing,
                 })
+                return
+            if path == "/api/v1/scan":
+                try:
+                    report = hardware_scan.scan()
+                    self._send_json({
+                        "api_version": api.API_VERSION,
+                        "product_version": api.PRODUCT_VERSION,
+                        "scan": report.as_dict(),
+                    })
+                except Exception as exc:
+                    self._send_json({"error": str(exc)}, 503)
                 return
             if path == "/api/v1/telemetry":
                 self._send_json({

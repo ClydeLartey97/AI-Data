@@ -245,3 +245,16 @@ def load(versions=DEFAULT_VERSIONS, *, cache_dir: Path | None = None,
         except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
             warnings.append(str(exc))
     return results, warnings
+
+
+#: Parsing 17k rows costs about a second, and the published record only
+#: changes when MLPerf publishes a round. Cached for the process lifetime.
+_PROFILE_CACHE: tuple[list, list[str]] | None = None
+
+
+def cached_profiles() -> tuple[list[DeviceProfile], list[str]]:
+    global _PROFILE_CACHE
+    if _PROFILE_CACHE is None:
+        results, warnings = load()
+        _PROFILE_CACHE = (build_profiles(results), warnings)
+    return _PROFILE_CACHE
