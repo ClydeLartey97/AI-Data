@@ -24,6 +24,13 @@ from enum import Enum
 
 class Provenance(str, Enum):
     MEASURED = "MEASURED"
+    #: Measured by an audited third party under a published, fixed workload —
+    #: MLPerf submissions, principally. Stronger than a vendor's theoretical
+    #: SPEC peak because real work ran and its accuracy was verified, but
+    #: weaker than MEASURED because we did not run it, cannot reproduce it on
+    #: demand, and the submitter tuned hard for the result. Treat as a
+    #: well-evidenced ceiling, never as typical deployment throughput.
+    PUBLISHED = "PUBLISHED"
     SPEC = "SPEC"
     ESTIMATED = "ESTIMATED"
     SIMULATED = "SIMULATED"
