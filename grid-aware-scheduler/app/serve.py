@@ -36,7 +36,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from app import api, dashboard, decisions, planner, simulator, workloads
 from app.markets import load_market, summarise_market
-from core import audit_store, evidence_store
+from core import audit_store, evidence_store, pilot_report, site_profile
 from core.grid import Job
 from hardware.providers import LocalDetector, RedfishFleetProvider
 from hardware.calibration import load_profiles
@@ -311,6 +311,50 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                     })
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, 400)
+                return
+            if path == "/api/v1/site-profile":
+                # What the operator declared about this site, once, instead of
+                # typing it into a form per request.
+                config = Path(os.environ.get("SITE_PROFILE",
+                                             site_profile.DEFAULT_PATH))
+                try:
+                    profile = site_profile.load(config)
+                except site_profile.ProfileError as exc:
+                    self._send_json({
+                        "api_version": api.API_VERSION,
+                        "configured": True, "valid": False,
+                        "error": str(exc),
+                    }, 422)
+                    return
+                self._send_json({
+                    "api_version": api.API_VERSION,
+                    "product_version": api.PRODUCT_VERSION,
+                    "configured": profile is not None,
+                    "valid": profile is not None,
+                    "profile": None if profile is None else profile.public_dict(),
+                })
+                return
+            if path == "/api/v1/pilot-report":
+                # The journal aggregated into what a pilot actually produced.
+                # `format=text` returns the same content unstyled, so it can be
+                # pasted into a document without carrying a layout with it.
+                try:
+                    report = pilot_report.build(
+                        limit=int(query.get("limit", ["200"])[0]),
+                        since=(query.get("since", [None])[0] or None),
+                    )
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, 400)
+                    return
+                if query.get("format", [""])[0] == "text":
+                    self._send(pilot_report.render(report).encode("utf-8"),
+                               200, "text/plain; charset=utf-8")
+                    return
+                self._send_json({
+                    "api_version": api.API_VERSION,
+                    "product_version": api.PRODUCT_VERSION,
+                    "report": report,
+                })
                 return
             if path.startswith("/api/v1/decisions/"):
                 decision_id = path.rsplit("/", 1)[-1]

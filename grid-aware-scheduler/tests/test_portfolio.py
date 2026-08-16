@@ -262,3 +262,64 @@ def test_portfolio_places_accelerator_stage_in_best_generation_surplus_window():
     assert baseline.energy_dispatches[0].jobs["train"].grid_kwh == pytest.approx(50)
     assert baseline.energy_dispatches[0].jobs["train"].renewable_match_pct == pytest.approx(50)
     assert baseline.exact is False
+
+
+def test_a_heavy_job_runs_where_the_power_ceiling_is_high_not_where_it_is_flat():
+    """The performance case, and the reason the ceiling is not one number.
+
+    A 4 kW job cannot run under the 2 kW ceiling the site holds most of the
+    day. For two half hours its own generation lifts the ceiling to 5 kW, and
+    the scheduler places the work there. Under the old flat ceiling this job
+    was simply infeasible — so the varying ceiling is not a saving, it is
+    work that could not otherwise be done at all.
+    """
+    prices = [10.0] * 8
+    carbons = [100.0] * 8
+    candidate = _candidate("heavy", prices, carbons, power=4.0)
+    job = PortfolioJob(
+        job_id="train", candidates=(candidate,), earliest_start=START,
+        deadline=START + timedelta(hours=4), work_amount=100,
+        work_unit="tokens", utility=1, mandatory=True,
+    )
+    sunny = (START + timedelta(hours=1), START + timedelta(minutes=90))
+    policy = PortfolioPolicy(capacities=(SiteCapacity(
+        "GB", "London", 5.0,
+        power_profile_kw=tuple(
+            (START + timedelta(minutes=30 * i),
+             5.0 if START + timedelta(minutes=30 * i) in sunny else 2.0)
+            for i in range(8)),
+    ),))
+    result = optimise_portfolio([job], policy)
+    assert len(result.assignments) == 1
+    assert result.assignments[0].option.start_time in sunny
+
+
+def test_work_that_fits_in_no_interval_is_still_refused():
+    """A higher ceiling somewhere must not become a licence everywhere."""
+    candidate = _candidate("huge", [10.0] * 4, [100.0] * 4, power=9.0)
+    job = PortfolioJob(
+        job_id="train", candidates=(candidate,), earliest_start=START,
+        deadline=START + timedelta(hours=2), work_amount=100,
+        work_unit="tokens", utility=1, mandatory=True,
+    )
+    policy = PortfolioPolicy(capacities=(SiteCapacity(
+        "GB", "London", 10.0,
+        power_profile_kw=tuple(
+            (START + timedelta(minutes=30 * i), 5.0) for i in range(4)),
+    ),))
+    with pytest.raises(ValueError, match="infeasible"):
+        optimise_portfolio([job], policy)
+
+
+def test_a_power_profile_cannot_exceed_the_sites_electrical_limit():
+    """Generation raises the usable ceiling toward the wire, never through it."""
+    with pytest.raises(ValueError, match="absolute electrical limit"):
+        SiteCapacity("GB", "London", 2.0,
+                     power_profile_kw=((START, 3.0),))
+
+
+def test_an_interval_without_a_declared_ceiling_falls_back_to_the_limit():
+    capacity = SiteCapacity("GB", "London", 7.0,
+                            power_profile_kw=((START, 2.0),))
+    assert capacity.limit_at(START) == 2.0
+    assert capacity.limit_at(START + timedelta(hours=5)) == 7.0

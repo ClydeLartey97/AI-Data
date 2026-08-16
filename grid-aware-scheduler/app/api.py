@@ -997,8 +997,25 @@ def portfolio_response(payload: dict[str, Any], context: MarketContext,
         except (TypeError, ValueError) as exc:
             raise ValueError(f"invalid job {job_id!r}: {exc}") from exc
 
+    # A declared power envelope makes on-site generation a throughput input,
+    # not only a price one: the ceiling rises while the site's own generation
+    # runs, so heavy work placed there runs at full power instead of being
+    # throttled behind a flat limit. Absent a declaration the ceiling is the
+    # flat `max_power_kw` it has always been.
+    envelope_raw = facility_raw.get("power_profile_kw")
+    envelope: tuple[tuple[datetime, float], ...] = ()
+    if envelope_raw is not None:
+        values = _numeric_series(
+            envelope_raw, "power_profile_kw", len(context.series),
+            minimum=0, maximum=max_power_kw,
+        )
+        envelope = tuple(
+            (point.timestamp, value)
+            for point, value in zip(context.series, values)
+        )
     capacities = (SiteCapacity(
         context.market_key, context.location_name, max_power_kw,
+        power_profile_kw=envelope,
     ),)
     energy_profiles = (energy_profile,) if energy_profile else ()
     result = optimise_portfolio(

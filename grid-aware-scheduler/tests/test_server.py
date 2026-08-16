@@ -413,3 +413,73 @@ def test_inventory_refresh_walks_real_loopback_redfish(
     for leak in ("437XR1138R2", "38947555", "8675309",
                  "Chicago-45Z-2381", "secret"):
         assert leak not in raw
+
+
+def test_pilot_report_endpoint_reports_an_empty_journal_honestly(local_server):
+    """A pilot with nothing scored must not serve a saving of zero."""
+    _, payload = _json(f"{local_server}/api/v1/pilot-report")
+    report = payload["report"]
+    assert report["mode"] == "shadow"
+    assert report["claimable"]["state"] == "no_measured_result"
+    assert report["coverage"]["decisions_recorded"] == 0
+    assert report["disclosures"]
+
+
+def test_pilot_report_aggregates_a_scored_decision_end_to_end(local_server):
+    """Plan through the API, score it, then read the aggregate back out."""
+    request = urllib.request.Request(
+        f"{local_server}/api/v1/plan",
+        data=json.dumps(_payload()).encode(),
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    _, planned = _json(request)
+    decision_id = planned["decision_id"]
+
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    realised = {"realised_points": [
+        {"timestamp": (start + timedelta(minutes=30 * i)).isoformat(),
+         "price": 100 + i, "carbon_intensity_g_per_kwh": 50 - i}
+        for i in range(48)]}
+    score_request = urllib.request.Request(
+        f"{local_server}/api/v1/decisions/{decision_id}/score",
+        data=json.dumps(realised).encode(),
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    _, scored = _json(score_request)
+    assert scored["score"]["decision_id"] == decision_id
+
+    _, payload = _json(f"{local_server}/api/v1/pilot-report")
+    report = payload["report"]
+    assert report["coverage"]["decisions_recorded"] == 1
+    assert report["coverage"]["decisions_scored"] == 1
+    assert report["claimable"]["state"] == "indicative"
+
+    with urllib.request.urlopen(
+            f"{local_server}/api/v1/pilot-report?format=text", timeout=10) as response:
+        text = response.read().decode()
+    assert response.headers["Content-Type"].startswith("text/plain")
+    assert "Shadow-mode pilot report" in text
+    assert "Disclosures" in text
+
+
+def test_site_profile_endpoint_is_honest_when_nothing_is_declared(local_server,
+                                                                  monkeypatch,
+                                                                  tmp_path):
+    """Most sites have not declared one. That is a state, not a fault."""
+    monkeypatch.setenv("SITE_PROFILE", str(tmp_path / "absent.json"))
+    _, payload = _json(f"{local_server}/api/v1/site-profile")
+    assert payload["configured"] is False
+    assert payload["profile"] is None
+
+
+def test_site_profile_endpoint_reports_an_invalid_declaration(local_server,
+                                                              monkeypatch,
+                                                              tmp_path):
+    """A broken document must say what is wrong, not fall back to defaults."""
+    broken = tmp_path / "site-profile.json"
+    broken.write_text(json.dumps({"version": "facility-energy-v9"}))
+    monkeypatch.setenv("SITE_PROFILE", str(broken))
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(f"{local_server}/api/v1/site-profile", timeout=10)
+    assert caught.value.code == 422
+    assert "unsupported site profile version" in caught.value.read().decode()

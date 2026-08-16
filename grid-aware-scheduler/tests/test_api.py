@@ -588,3 +588,38 @@ def test_score_api_replays_persisted_decision_on_realised_points():
 def test_score_api_requires_realised_points():
     with pytest.raises(ValueError, match="realised_points"):
         score_response({}, {})
+
+
+def test_portfolio_api_places_work_where_the_declared_ceiling_is_high():
+    """A declared power envelope makes generation a throughput input.
+
+    Both jobs draw 1 kW and the site holds 2 kW, but the envelope allows only
+    0.5 kW outside two intervals — not enough to run either job. Both jobs
+    must therefore land inside the high window, and the fact that they run
+    *concurrently* there is the point: a wider ceiling buys parallelism, not
+    just a cheaper hour.
+    """
+    context = _context()
+    allowed = {context.series[2].timestamp, context.series[3].timestamp}
+    payload = _portfolio_payload()
+    payload["facility"] = {
+        "max_power_kw": 2,
+        "power_profile_kw": [2 if point.timestamp in allowed else 0.5
+                             for point in context.series],
+    }
+    response = portfolio_response(payload, context)
+    starts = {row["start"] for row in response["assignments"]}
+    assert len(response["assignments"]) == 2
+    assert starts <= {stamp.isoformat() for stamp in allowed}
+
+
+def test_portfolio_api_rejects_a_ceiling_above_the_sites_own_limit():
+    """Generation raises the usable ceiling toward the wire, not through it."""
+    context = _context()
+    payload = _portfolio_payload()
+    payload["facility"] = {
+        "max_power_kw": 1,
+        "power_profile_kw": [5] * len(context.series),
+    }
+    with pytest.raises(ValueError, match="power_profile_kw"):
+        portfolio_response(payload, context)

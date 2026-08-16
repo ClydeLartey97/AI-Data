@@ -67,9 +67,26 @@ class PortfolioJob:
 
 @dataclass(frozen=True)
 class SiteCapacity:
+    """How much power the site can draw, and when.
+
+    `max_facility_power_kw` is the site's absolute electrical ceiling — the
+    interconnection or switchgear limit, which does not move.
+
+    `power_profile_kw` is the ceiling that actually binds in each half hour,
+    and it is the reason this class is not a single number. A site with
+    on-site generation can run more accelerators at once while that
+    generation is producing: at noon under 500 kW of solar the headroom is
+    genuinely larger than it is at 03:00, so heavy work placed there finishes
+    sooner rather than being throttled or queued behind a flat ceiling. An
+    interval with no declared entry falls back to the absolute limit, and no
+    entry may exceed it — on-site generation raises the usable ceiling toward
+    the electrical limit, never through it.
+    """
+
     market: str
     location: str
     max_facility_power_kw: float
+    power_profile_kw: tuple[tuple[datetime, float], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.market.strip() or not self.location.strip():
@@ -79,10 +96,43 @@ class SiteCapacity:
                 or not math.isfinite(self.max_facility_power_kw)
                 or self.max_facility_power_kw <= 0):
             raise ValueError("site capacity must be finite and positive")
+        stamps = [stamp for stamp, _ in self.power_profile_kw]
+        if len(stamps) != len(set(stamps)):
+            raise ValueError("site power profile timestamps must be unique")
+        for stamp, value in self.power_profile_kw:
+            if stamp.tzinfo is None:
+                raise ValueError("site power profile needs aware timestamps")
+            if (isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0):
+                raise ValueError("site power profile values must be >= 0")
+            if value > self.max_facility_power_kw + 1e-9:
+                raise ValueError(
+                    "a site power profile cannot exceed the facility's "
+                    "absolute electrical limit")
+        # The search consults this once per job per interval, so it is a dict
+        # rather than a scan over the declared pairs.
+        object.__setattr__(self, "_limits", dict(self.power_profile_kw))
 
     @property
     def key(self) -> tuple[str, str]:
         return self.market, self.location
+
+    @property
+    def peak_available_kw(self) -> float:
+        """The most this site can ever draw across the declared horizon.
+
+        Used to reject work that cannot run at any hour. Rejecting against
+        the lowest interval instead would discard exactly the heavy jobs a
+        varying ceiling exists to accommodate.
+        """
+        if not self.power_profile_kw:
+            return self.max_facility_power_kw
+        return max(value for _, value in self.power_profile_kw)
+
+    def limit_at(self, timestamp: datetime) -> float:
+        return getattr(self, "_limits", {}).get(
+            timestamp, self.max_facility_power_kw)
 
 
 @dataclass(frozen=True)
@@ -271,7 +321,7 @@ def optimise_portfolio(jobs: list[PortfolioJob],
     if len(currencies) > 1:
         raise ValueError("portfolio cannot rank mixed currencies")
 
-    capacity = {item.key: item.max_facility_power_kw for item in policy.capacities}
+    capacity = {item.key: item for item in policy.capacities}
     energy_profiles = {profile.key: profile for profile in policy.energy_profiles}
     options_by_job: list[tuple[PortfolioJob, list[PlanOption]]] = []
     rejected: dict[str, str] = {}
@@ -286,14 +336,33 @@ def optimise_portfolio(jobs: list[PortfolioJob],
             sites = ", ".join(f"{market}/{location}"
                               for market, location in sorted(unknown_sites))
             raise ValueError(f"no facility capacity supplied for {sites}")
+        # Filter against the site's best interval, not a flat number: a job
+        # that only fits while on-site generation is running is precisely
+        # what a varying ceiling is for, and must survive to be placed there.
+        windowed = options
         options = [option for option in options if (
             (option.candidate.market, option.candidate.location) in energy_profiles
             or option.candidate.facility_power_kw
-            <= capacity[(option.candidate.market, option.candidate.location)] + 1e-9
+            <= capacity[(option.candidate.market,
+                         option.candidate.location)].peak_available_kw + 1e-9
         )]
         if not options:
-            reason = next(iter(option_rejections.values()),
-                          "no complete price/carbon window inside the job window")
+            if windowed:
+                # Windows existed and every one drew more than the site can
+                # supply even at its best interval. Reporting a data gap here
+                # would send an operator to look at the wrong thing.
+                headroom = max(
+                    capacity[(option.candidate.market,
+                              option.candidate.location)].peak_available_kw
+                    for option in windowed)
+                drawn = min(option.candidate.facility_power_kw
+                            for option in windowed)
+                reason = (
+                    f"needs {drawn:g} kW but the site supplies at most "
+                    f"{headroom:g} kW in any interval")
+            else:
+                reason = next(iter(option_rejections.values()),
+                              "no complete price/carbon window inside the job window")
             rejected[job.job_id] = reason
             if job.mandatory:
                 raise ValueError(f"mandatory job {job.job_id!r} is infeasible: {reason}")
@@ -474,7 +543,7 @@ def optimise_portfolio(jobs: list[PortfolioJob],
                 (energy_profile.facility_at(timestamp).base_load_kw
                  if energy_profile is not None else 0.0)
                 + usage.get((market, location, timestamp), 0.0) + power
-                > capacity[(market, location)] + 1e-9
+                > capacity[(market, location)].limit_at(timestamp) + 1e-9
                 for market, location, timestamp, power, _ in slots
             ):
                 continue
@@ -566,7 +635,7 @@ def schedule_earliest(jobs: list[PortfolioJob],
     if len(job_ids) != len(set(job_ids)):
         raise ValueError("portfolio job IDs must be unique")
     ordered_jobs = _dependency_order(jobs)
-    capacity = {item.key: item.max_facility_power_kw for item in policy.capacities}
+    capacity = {item.key: item for item in policy.capacities}
     energy_profiles = {profile.key: profile for profile in policy.energy_profiles}
     usage: dict[tuple[str, str, datetime], float] = {}
     assignments: list[PortfolioAssignment] = []
@@ -615,7 +684,7 @@ def schedule_earliest(jobs: list[PortfolioJob],
             if any(
                 (profile.facility_at(timestamp).base_load_kw if profile else 0.0)
                 + usage.get((market, location, timestamp), 0.0) + power
-                > capacity[(market, location)] + 1e-9
+                > capacity[(market, location)].limit_at(timestamp) + 1e-9
                 for market, location, timestamp, power, _ in slots
             ):
                 continue

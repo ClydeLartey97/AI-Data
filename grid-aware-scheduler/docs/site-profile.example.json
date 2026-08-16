@@ -1,0 +1,81 @@
+{
+  "version": "facility-energy-v1",
+  "declared_by": "Site engineering, Example Operator",
+  "declared_at": "2026-08-16",
+
+  "site": {
+    "site_id": "dc-north-1",
+    "name": "North campus",
+    "latitude": 51.507400,
+    "longitude": -0.127800,
+    "grid_connection_id": "METER-EXAMPLE-0001",
+    "time_zone": "Europe/London"
+  },
+
+  "market": { "market": "GB", "location": "national" },
+
+  "facility": {
+    "base_load_kw": 900,
+    "pue": 1.24,
+    "night_pue": 1.16,
+    "max_import_kw": 4000,
+    "evidence": "metered"
+  },
+
+  "sources": [
+    {
+      "source_id": "solar-roof",
+      "name": "Rooftop PV array",
+      "kind": "solar",
+      "capacity_kw": 1800,
+      "availability_method": "weather",
+      "latitude": 51.509000,
+      "longitude": -0.130000,
+      "delivery_type": "onsite",
+      "dispatchable": false,
+      "confidence": 0.85,
+      "cost_per_mwh": 0,
+      "carbon_g_per_kwh": 0,
+      "delivery_loss_percent": 1.5,
+      "evidence": "nameplate"
+    },
+    {
+      "source_id": "wind-ppa-wire",
+      "name": "Adjacent wind farm, dedicated wire",
+      "kind": "wind",
+      "capacity_kw": 2500,
+      "availability_method": "weather",
+      "latitude": 51.900000,
+      "longitude": -0.127800,
+      "delivery_type": "dedicated_wire",
+      "dispatchable": false,
+      "confidence": 0.7,
+      "cost_per_mwh": 42,
+      "carbon_g_per_kwh": 0,
+      "delivery_loss_percent": 4.0,
+      "grid_connection_id": "METER-EXAMPLE-0002",
+      "evidence": "contracted"
+    },
+    {
+      "source_id": "vppa-national",
+      "name": "Virtual PPA, national portfolio",
+      "kind": "wind",
+      "capacity_kw": 6000,
+      "availability_method": "flat",
+      "delivery_type": "contractual",
+      "cost_per_mwh": 38,
+      "carbon_g_per_kwh": 0,
+      "evidence": "contracted"
+    }
+  ],
+
+  "battery": {
+    "capacity_kwh": 4000,
+    "max_charge_kw": 1000,
+    "max_discharge_kw": 1000,
+    "initial_energy_kwh": 0,
+    "round_trip_efficiency": 0.88
+  },
+
+  "dispatch_priority": "renewable"
+}
