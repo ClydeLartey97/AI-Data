@@ -29,12 +29,25 @@ env/
 # local facility-discovery endpoint declarations (docs/discovery.md) —
 # operator-specific addresses, never shared
 **/data/discovery.json
+# the operator's declared site energy profile (docs/site-profile.md) — real
+# meter IDs, contracts and connection identities. The example in docs/ is the
+# shareable one; this is not.
+**/data/site-profile.json
 *.sqlite
 *.db
 *.parquet
 
 # notebook scratch state
 .ipynb_checkpoints/
+
+# --- private strategy notes ------------------------------------------------
+# Market sizing, competitive positioning and target-operator assessments.
+# These say so in their own headers and must never reach the public repo: the
+# honesty rules in grid-aware-scheduler/HANDOFF.md keep commercial claims out
+# of docs/, and one `git add .` would otherwise publish them wholesale.
+/meta-fit-assessment.md
+/pilot-pitch-narrative.md
+/regulatory-market-landscape.md
 
 # --- os --------------------------------------------------------------------
 .DS_Store

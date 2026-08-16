@@ -254,6 +254,91 @@ def scan(*, include_published: bool = True,
     return report
 
 
+def capability(device: ScannedDevice) -> "roofline.DeviceCapability | None":
+    """Turn a scanned device into predictor input, best source winning.
+
+    Each constant is taken from the strongest source that has it: a ceiling
+    this project measured beats the catalogue, and the catalogue beats
+    nothing. The provenance travels with the number, so a prediction resting
+    on an estimate can never present itself as resting on a measurement.
+    """
+    from hardware import roofline
+
+    identity = device.identity or {}
+    memory = identity.get("memory_total_gb") or identity.get("memory_gb")
+    if not memory:
+        return None
+
+    bandwidth = tflops = None
+    bandwidth_provenance = compute_provenance = "UNAVAILABLE"
+
+    measured = device.measured or {}
+    if "memory_bandwidth_gbs" in measured:
+        bandwidth = measured["memory_bandwidth_gbs"]["median"]
+        bandwidth_provenance = Provenance.MEASURED.value
+    if "gemm_fp16_gflops" in measured:
+        tflops = measured["gemm_fp16_gflops"]["median"] / 1000.0
+        compute_provenance = Provenance.MEASURED.value
+
+    catalogue = device.catalogue or {}
+    if bandwidth is None and catalogue.get("memory_bandwidth_gbs"):
+        bandwidth = catalogue["memory_bandwidth_gbs"]
+        bandwidth_provenance = catalogue.get("provenance", Provenance.SPEC.value)
+    if tflops is None and catalogue.get("peak_tflops_bf16"):
+        tflops = catalogue["peak_tflops_bf16"]
+        compute_provenance = catalogue.get("provenance", Provenance.SPEC.value)
+
+    if bandwidth is None or tflops is None:
+        return None
+    return roofline.DeviceCapability(
+        name=device.name, memory_gb=float(memory),
+        memory_bandwidth_gbs=float(bandwidth), achievable_tflops=float(tflops),
+        bandwidth_provenance=bandwidth_provenance,
+        compute_provenance=compute_provenance,
+        accelerators=max(1, int(device.count)),
+    )
+
+
+def published_rates(device: ScannedDevice, model_hint: str = "") -> float | None:
+    """A third-party measured token rate for this device, if one matches."""
+    for entry in device.published or []:
+        if not model_hint or model_hint.lower() in str(entry.get("model", "")).lower():
+            units = str(entry.get("units", "")).lower()
+            if "token" in units:
+                return float(entry["per_accelerator"]) * max(1, int(device.count))
+    return None
+
+
+def plan(report: ScanReport, workload, **kwargs) -> dict:
+    """Rank every scanned device for one workload — the analyse step.
+
+    Devices whose capability is unknown are listed separately rather than
+    ranked, because an unranked device is honest and a guessed one is not.
+    """
+    from hardware import roofline
+
+    devices, unknown, published = [], [], {}
+    for device in report.devices:
+        found = capability(device)
+        if found is None:
+            unknown.append({"device": device.name,
+                            "reason": "capability not established"})
+            continue
+        devices.append(found)
+        rate = published_rates(device, getattr(workload, "name", ""))
+        if rate:
+            published[found.name] = rate
+
+    predictions = roofline.rank(workload, devices, published=published, **kwargs)
+    return {
+        "workload": workload.name,
+        "ranked": [asdict(p) for p in predictions],
+        "unranked": unknown,
+        "note": ("Ordering is a feasibility and magnitude check. Prefill "
+                 "remains predicted, so this is not a cross-vendor verdict."),
+    }
+
+
 def render(report: ScanReport) -> str:
     """A readable summary — the point of the scan, not a JSON dump."""
     lines: list[str] = []
