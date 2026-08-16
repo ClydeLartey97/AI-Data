@@ -19,7 +19,7 @@ font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Helvetica,Arial,sans-
 header{height:58px;padding:0 max(22px,calc((100% - 1280px)/2));display:flex;align-items:center;
 justify-content:space-between;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--card) 90%,transparent);
 position:sticky;top:0;z-index:4;backdrop-filter:blur(18px)}h1{font-size:17px;margin:0;letter-spacing:-.02em}
-body>.theme-control+header{padding-right:max(190px,calc((100% - 1280px)/2))}
+body>.theme-control~header{padding-right:max(190px,calc((100% - 1280px)/2))}
 nav{display:flex;gap:4px}nav a{color:var(--muted);text-decoration:none;padding:7px 10px;border-radius:8px}
 nav a:hover,nav a.on{color:var(--text);background:var(--bg)}main{max-width:1280px;margin:auto;padding:34px 22px 60px}
 .intro{display:flex;align-items:end;justify-content:space-between;gap:24px;margin-bottom:22px}.intro h2{font-size:34px;
@@ -47,12 +47,12 @@ max-height:calc(100vh - 92px);overflow:auto}.detail h3{font-size:22px;letter-spa
 .section{margin-top:20px}.section h4{font-size:13px;font-weight:650;letter-spacing:-0.005em;color:var(--text);margin:0 0 10px}
 .trace{margin:0;padding-left:18px;line-height:1.6}.actions{display:flex;gap:8px;margin-top:18px}.actions button{flex:1}.error{color:var(--red)}
 @media(max-width:900px){.intro{align-items:stretch;flex-direction:column}.metrics{min-width:0}.split{grid-template-columns:1fr}.detail{position:static;max-height:none}}
-@media(max-width:560px){header{height:auto;padding:12px 58px 12px 16px;align-items:flex-start;gap:8px;flex-direction:column}body>.theme-control+header{padding-right:58px}nav{width:100%;overflow:auto}.intro h2{font-size:29px}.metrics{grid-template-columns:1fr}.toolbar{flex-wrap:wrap}.grid{grid-template-columns:1fr}}
+@media(max-width:560px){header{height:auto;padding:12px 58px 12px 16px;align-items:flex-start;gap:8px;flex-direction:column}body>.theme-control~header{padding-right:58px}nav{width:100%;overflow:auto}.intro h2{font-size:29px}.metrics{grid-template-columns:1fr}.toolbar{flex-wrap:wrap}.grid{grid-template-columns:1fr}}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#000;--card:#1c1c1e;--text:#f5f5f7;--muted:#a1a1aa;--line:#343438;--blue:#0a84ff;--green:#32a852;--amber:#ff9f0a;--shadow:none}}
 :root[data-theme="dark"]{--bg:#000;--card:#1c1c1e;--text:#f5f5f7;--muted:#a1a1aa;--line:#343438;--blue:#0a84ff;--green:#32a852;--amber:#ff9f0a;--shadow:none}
 """ + THEME_CSS + """
 </style></head><body>""" + THEME_CONTROL + """
-<header><h1>AI Data Centre Operations</h1><nav><a href="/">Operations</a><a href="/simulator">Fleet Lab</a><a href="/planner">Placement Lab</a><a href="/grid">Sites &amp; Grid</a><a class="on" href="/decisions">Decisions</a></nav></header>
+<header><h1>AI Data Centre Operations</h1><nav><a href="/">Operations</a><a href="/simulator">Fleet Lab</a><a href="/planner">Placement Lab</a><a href="/grid">Sites &amp; Grid</a><a href="/site">Site</a><a class="on" href="/decisions">Decisions</a></nav></header>
 <main><div class="intro"><div><div class="eyebrow">Audit and evidence</div><h2>Decision journal</h2><p>Every saved recommendation is immutable. Open a row to inspect its constraints, selected placement, signal provenance and realised score.</p></div>
 <div class="metrics"><div class="metric"><b id="total">0</b><span>Saved</span></div><div class="metric"><b id="scored">0</b><span>Scored</span></div><div class="metric"><b id="pending">0</b><span>Awaiting outturn</span></div></div></div>
 <div class="toolbar card"><input id="search" type="search" placeholder="Search ID, model, hardware or location" aria-label="Search decisions"><select id="status" aria-label="Filter by status"><option value="all">All evidence states</option><option value="scored">Scored</option><option value="awaiting_outturn">Awaiting outturn</option></select><button id="refresh" type="button">Refresh</button><button id="report" type="button">Pilot report</button></div>

@@ -608,7 +608,7 @@ svg [hidden] {{ display: none; }}
 <header>
   <h1>Grid Signal</h1>
   <p class="sub">{html.escape(market)} · {html.escape(location_name)} · {html.escape(range_start.strftime('%a %d %b'))} to {html.escape(series[-1].timestamp.strftime('%a %d %b %Y'))}</p>
-  <nav><a href="{html.escape(operations_href)}">Operations</a><a href="{html.escape(simulator_href)}">Fleet Lab</a><a href="{html.escape(planner_href)}">Placement Lab</a><a href="{html.escape(grid_view_href)}" class="on">Sites &amp; Grid</a><a href="/decisions">Decisions</a></nav>
+  <nav><a href="{html.escape(operations_href)}">Operations</a><a href="{html.escape(simulator_href)}">Fleet Lab</a><a href="{html.escape(planner_href)}">Placement Lab</a><a href="{html.escape(grid_view_href)}" class="on">Sites &amp; Grid</a><a href="/site">Site</a><a href="/decisions">Decisions</a></nav>
   {_market_controls(context)}
   <div class="badge">MEASURED · {html.escape(signal_mode)} · {complete_count} of {len(series)} half-hours fully scored</div>
 </header>

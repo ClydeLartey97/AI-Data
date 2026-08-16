@@ -389,3 +389,24 @@ def test_candles_are_not_flat_at_native_resolution():
     html = _chart_html()
     assert '"o":' not in html and '"h":' not in html
     assert 'data-iv="21600"' in html
+
+
+def test_site_declaration_page_renders_with_no_leftover_tokens():
+    from app import site
+    page = site.render()
+    assert "__THEME" not in page
+    assert "facility-energy-v1" in page
+    assert 'id="plants"' in page
+
+
+def test_every_page_reserves_space_for_the_appearance_control():
+    """`+` never matched: THEME_CONTROL emits a script between the two.
+
+    The rule sat dead on every bar-style header, and a five-item nav simply
+    happened to fit. Adding a sixth exposed it by hiding two links under the
+    toggle, so the general sibling combinator is the one that must be used.
+    """
+    from app import decisions, site
+    for page in (decisions.render(), site.render()):
+        assert "body>.theme-control~header" in page
+        assert "body>.theme-control+header" not in page

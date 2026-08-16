@@ -354,7 +354,7 @@ border:1px solid var(--sep);background:var(--card);color:var(--text)}}
 <header>
   <h1>Model Simulator</h1>
   <p class="sub">How a model runs on hardware you don't have — and what the grid charges for it.</p>
-  <nav><a href="{html.escape(operations_href)}">Operations</a><a href="/simulator?{html.escape(query)}" class="on">Fleet Lab</a><a href="{html.escape(planner_href)}">Placement Lab</a><a href="{html.escape(grid_href)}">Sites &amp; Grid</a><a href="/decisions">Decisions</a></nav>
+  <nav><a href="{html.escape(operations_href)}">Operations</a><a href="/simulator?{html.escape(query)}" class="on">Fleet Lab</a><a href="{html.escape(planner_href)}">Placement Lab</a><a href="{html.escape(grid_href)}">Sites &amp; Grid</a><a href="/site">Site</a><a href="/decisions">Decisions</a></nav>
 </header>
 
 <section class="card">

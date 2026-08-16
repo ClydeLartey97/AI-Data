@@ -483,3 +483,111 @@ def test_site_profile_endpoint_reports_an_invalid_declaration(local_server,
         urllib.request.urlopen(f"{local_server}/api/v1/site-profile", timeout=10)
     assert caught.value.code == 422
     assert "unsupported site profile version" in caught.value.read().decode()
+
+
+def _declaration(**overrides):
+    document = {
+        "version": "facility-energy-v1",
+        "declared_by": "Site engineering",
+        "declared_at": "2026-08-16",
+        "site": {"site_id": "dc-1", "name": "Site One",
+                 "latitude": 51.5074, "longitude": -0.1278,
+                 "time_zone": "Europe/London"},
+        "market": {"market": "GB", "location": "national"},
+        "facility": {"base_load_kw": 0, "pue": 1.0, "max_import_kw": 1},
+        "sources": [{
+            "source_id": "solar-a", "name": "Rooftop array", "kind": "solar",
+            "capacity_kw": 4, "availability_method": "diurnal",
+            "peak_hour": 1, "evidence": "nameplate"}],
+        "dispatch_priority": "renewable",
+    }
+    document.update(overrides)
+    return document
+
+
+def _post(url, body):
+    return urllib.request.Request(
+        url, data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+
+
+def test_a_company_can_declare_its_site_and_read_it_back(local_server,
+                                                         monkeypatch, tmp_path):
+    """The input path: specifications in, validated document out."""
+    monkeypatch.setenv("SITE_PROFILE", str(tmp_path / "site-profile.json"))
+    response, created = _json(_post(f"{local_server}/api/v1/site-profile",
+                                    _declaration()))
+    assert response.status == 201
+    assert created["profile"]["site"]["site_id"] == "dc-1"
+
+    _, stored = _json(f"{local_server}/api/v1/site-profile")
+    assert stored["configured"] is True
+    assert stored["profile"]["sources"][0]["capacity_kw"] == 4
+
+
+def test_an_invalid_declaration_leaves_the_previous_one_in_place(local_server,
+                                                                 monkeypatch,
+                                                                 tmp_path):
+    """A half-applied site declaration would be worse than a rejected one."""
+    path = tmp_path / "site-profile.json"
+    monkeypatch.setenv("SITE_PROFILE", str(path))
+    _json(_post(f"{local_server}/api/v1/site-profile", _declaration()))
+    broken = _declaration()
+    broken["sources"][0]["capacity_kw"] = "lots"
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(
+            _post(f"{local_server}/api/v1/site-profile", broken), timeout=10)
+    assert caught.value.code == 400
+    _, stored = _json(f"{local_server}/api/v1/site-profile")
+    assert stored["profile"]["sources"][0]["capacity_kw"] == 4
+
+
+def test_a_declared_site_schedules_against_its_own_generation(local_server,
+                                                              monkeypatch,
+                                                              tmp_path):
+    """The whole loop: declaration -> available power -> a placed workload.
+
+    The site imports at most 1 kW, so a 2 kW job can only run while its own
+    array is producing. The scheduler has to find that window from the
+    declaration alone — nothing about power was sent with the request.
+    """
+    monkeypatch.setenv("SITE_PROFILE", str(tmp_path / "site-profile.json"))
+    _json(_post(f"{local_server}/api/v1/site-profile", _declaration()))
+
+    payload = {
+        "use_site_profile": True,
+        "jobs": [{
+            "job_id": "train", "earliest_delay_hours": 0,
+            "deadline_hours": 6, "work_amount": 256, "work_unit": "tokens",
+            "workload_class": "language_generation", "run_mode": "inference",
+            "utility": 1, "minimum_quality": 0.8, "mandatory": True,
+            "variants": [{
+                "candidate_key": "train-gpu", "hardware": "Apple M2 GPU",
+                "model_id": "reference-language-model", "model_version": "1.0",
+                "precision": "int4", "compute_unit": "gpu",
+                "memory_required_gb": 2, "memory_available_gb": 8,
+                "runtime_hours": 0.5, "it_power_kw": 2, "pue": 1,
+                "quality_score": 0.9, "quality_provenance": "MEASURED",
+                "evaluation_suite": "operator-eval", "evaluation_version": "1.0",
+                "hardware_provenance": "MEASURED"}],
+        }],
+    }
+    _, response = _json(_post(f"{local_server}/api/v1/portfolio", payload))
+    assert response["site_profile"]["site_id"] == "dc-1"
+    assert response["site_profile"]["peak_available_kw"] > 1
+    assert len(response["assignments"]) == 1
+
+
+def test_a_typed_facility_cannot_silently_override_the_declared_site(
+        local_server, monkeypatch, tmp_path):
+    """The declaration is authoritative, so a stale browser field must fail."""
+    monkeypatch.setenv("SITE_PROFILE", str(tmp_path / "site-profile.json"))
+    _json(_post(f"{local_server}/api/v1/site-profile", _declaration()))
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(_post(f"{local_server}/api/v1/portfolio", {
+            "use_site_profile": True,
+            "facility": {"max_power_kw": 500},
+            "jobs": [],
+        }), timeout=10)
+    assert caught.value.code == 400
+    assert "not both" in caught.value.read().decode()

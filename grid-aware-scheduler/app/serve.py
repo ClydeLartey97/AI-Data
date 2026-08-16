@@ -34,7 +34,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from app import api, dashboard, decisions, planner, simulator, workloads
+from app import (api, dashboard, decisions, planner, simulator, site,
+                 workloads)
 from app.markets import load_market, summarise_market
 from core import audit_store, evidence_store, pilot_report, site_profile
 from core.grid import Job
@@ -56,6 +57,54 @@ DISCOVERY_CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "discover
 def _discovery_config_path() -> Path:
     override = os.environ.get("DISCOVERY_CONFIG")
     return Path(override) if override else DISCOVERY_CONFIG_PATH
+
+
+def _site_profile_path() -> Path:
+    override = os.environ.get("SITE_PROFILE")
+    return Path(override) if override else site_profile.DEFAULT_PATH
+
+
+def _apply_site_profile(payload: dict, context) -> dict | None:
+    """Replace a typed facility with the site the operator declared.
+
+    This is where a declaration becomes a schedule. The document names each
+    plant and where it stands; the weather at those coordinates is fetched
+    here, converted to available power, and turned into the per-interval
+    ceiling the portfolio scheduler enforces — so on-site generation decides
+    how much compute can run at once, not merely what it costs.
+
+    A caller may not send `facility` and `use_site_profile` together. The
+    declared document wins by construction rather than by merge, so a stale
+    browser field can never quietly override what the site declared — the
+    same rule stored evidence profiles already follow.
+    """
+    if not isinstance(payload, dict) or not payload.get("use_site_profile"):
+        return None
+    if payload.get("facility"):
+        raise ValueError(
+            "send either facility or use_site_profile, not both: the "
+            "declared site profile is authoritative")
+    profile = site_profile.load(_site_profile_path())
+    if profile is None:
+        raise ValueError(
+            "no site profile is declared; POST one to /api/v1/site-profile "
+            "or send an explicit facility object")
+
+    stamps = [point.timestamp for point in context.series]
+    weather, warnings = site_profile.fetch_weather(profile, stamps)
+    payload["facility"] = site_profile.to_facility_payload(
+        profile, stamps, weather)
+    envelope = payload["facility"].get("power_profile_kw") or []
+    return {
+        "site_id": profile.site["site_id"],
+        "declared_by": profile.declared_by,
+        "declared_at": profile.declared_at,
+        "sources": len(profile.sources),
+        "weather_backed_sources": sorted(weather),
+        "peak_available_kw": round(max(envelope), 3) if envelope else None,
+        "lowest_available_kw": round(min(envelope), 3) if envelope else None,
+        "warnings": list(profile.warnings) + warnings,
+    }
 
 
 #: One shared collector so CPU percentages are real deltas between ticks
@@ -334,6 +383,44 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                     "profile": None if profile is None else profile.public_dict(),
                 })
                 return
+            if path == "/api/v1/site-supply":
+                # The declaration turned into actual available power: fetch
+                # each plant's weather, convert it, and report the ceiling
+                # the scheduler will be working against.
+                profile = None
+                try:
+                    profile = site_profile.load(_site_profile_path())
+                except site_profile.ProfileError as exc:
+                    self._send_json({"error": str(exc)}, 422)
+                    return
+                if profile is None:
+                    self._send_json({"error": "no site profile is declared"}, 409)
+                    return
+                market, location = self._market_location(query)
+                context = get_context(market, location, planning=True, span=2)
+                stamps = [point.timestamp for point in context.series]
+                weather, warnings = site_profile.fetch_weather(profile, stamps)
+                envelope = site_profile.power_envelope(
+                    profile, stamps, weather,
+                    electrical_limit_kw=profile.electrical_limit_kw)
+                self._send_json({
+                    "api_version": api.API_VERSION,
+                    "site_id": profile.site["site_id"],
+                    "import_limit_kw": profile.max_import_kw,
+                    "electrical_limit_kw": profile.electrical_limit_kw,
+                    "peak_available_kw": max(v for _, v in envelope),
+                    "lowest_available_kw": min(v for _, v in envelope),
+                    "weather_backed_sources": sorted(weather),
+                    "available_kw": [
+                        {"timestamp": stamp.isoformat(), "kw": round(value, 3)}
+                        for stamp, value in envelope
+                    ],
+                    "warnings": list(profile.warnings) + warnings,
+                    "boundary": (
+                        "Availability is a physics conversion of a public "
+                        "weather forecast, not plant telemetry."),
+                })
+                return
             if path == "/api/v1/pilot-report":
                 # The journal aggregated into what a pilot actually produced.
                 # `format=text` returns the same content unstyled, so it can be
@@ -369,7 +456,7 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                 return
             if path not in ("/", "/index.html", "/operations", "/grid",
                             "/simulator", "/planner", "/workloads", "/decisions",
-                            "/api/v1/market"):
+                            "/site", "/api/v1/market"):
                 self.send_error(404, "Not found")
                 return
 
@@ -414,7 +501,9 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                 return workloads.render(context)
 
             try:
-                if path == "/decisions":
+                if path == "/site":
+                    html, cached = site.render(), True
+                elif path == "/decisions":
                     html, cached = decisions.render(), True
                 elif path in ("/", "/index.html", "/operations", "/workloads"):
                     html, cached = planner_cache.get(
@@ -445,9 +534,11 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
             is_evidence = path == "/api/v1/evidence/observations"
             is_evidence_probe = path == "/api/v1/evidence/probe"
             is_inventory_refresh = path == "/api/v1/inventory/refresh"
+            is_site_profile = path == "/api/v1/site-profile"
             if (path != "/api/v1/plan" and not is_portfolio
                     and not is_score and not is_evidence
-                    and not is_evidence_probe and not is_inventory_refresh):
+                    and not is_evidence_probe and not is_inventory_refresh
+                    and not is_site_profile):
                 self.send_error(404, "Not found")
                 return
             if not self.headers.get("Content-Type", "").lower().startswith("application/json"):
@@ -506,6 +597,24 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                         "summary": evidence_store.summary(),
                     }, 200 if result["duplicate"] else 201)
                     return
+                if is_site_profile:
+                    # Declaring the site is a write, so it is validated in
+                    # full before it replaces anything. An invalid document
+                    # leaves the previous declaration in place rather than
+                    # half-applying itself.
+                    if not isinstance(payload, dict):
+                        raise ValueError("site profile must be an object")
+                    profile = site_profile.parse(payload)
+                    target = _site_profile_path()
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(json.dumps(payload, indent=2))
+                    self._send_json({
+                        "api_version": api.API_VERSION,
+                        "product_version": api.PRODUCT_VERSION,
+                        "stored": True,
+                        "profile": profile.public_dict(),
+                    }, 201)
+                    return
                 if is_score:
                     decision_id = path[len(score_prefix):-len("/score")].strip("/")
                     decision = audit_store.get_decision(decision_id)
@@ -529,9 +638,13 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                 market, location = self._market_location(query)
                 context = get_context(market, location, planning=True, span=2)
                 if is_portfolio:
-                    self._send_json(api.portfolio_response(
+                    notes = _apply_site_profile(payload, context)
+                    response = api.portfolio_response(
                         payload, context, evidence_store.profile_map(),
-                    ))
+                    )
+                    if notes:
+                        response["site_profile"] = notes
+                    self._send_json(response)
                     return
                 response = api.plan_response(payload, context, load_profiles())
                 decision_id = audit_store.save_decision(

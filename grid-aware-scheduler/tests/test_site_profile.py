@@ -179,7 +179,10 @@ def test_the_document_compiles_into_the_planner_s_existing_request():
     profile = site_profile.parse(_document())
     payload = site_profile.to_facility_payload(profile, _half_hours(4))
     assert payload["base_load_kw"] == 60
-    assert payload["dispatch_priority"] == "renewable"
+    # The API's own name for the setting — emitting the document's wording
+    # would silently fall back to the default and change the dispatch order.
+    assert payload["energy_priority"] == "renewable"
+    assert "dispatch_priority" not in payload
     assert len(payload["pue_profile"]) == 4
     source = payload["energy_sources"][0]
     assert source["source_id"] == "solar-a"
@@ -212,3 +215,124 @@ def test_a_loaded_document_reports_its_own_boundary(tmp_path):
     assert published["declared_by"] == "Site engineering"
     assert "not verified here" in published["boundary"]
     assert published["sources"][0]["physical"] is True
+
+
+# --- weather, fetched per plant ---------------------------------------------
+
+class _FakeAdapter:
+    """Stands in for Open-Meteo. Records what it was asked for."""
+
+    def __init__(self, radiation=800.0, wind=11.0, fail=False):
+        self.radiation, self.wind, self.fail = radiation, wind, fail
+        self.requests = []
+
+    def forecast(self, location, days=2):
+        self.requests.append((round(location.latitude, 4),
+                              round(location.longitude, 4), days))
+        if self.fail:
+            raise RuntimeError("forecast host unreachable")
+
+        class _Point:
+            def __init__(self, stamp, radiation, wind):
+                self.timestamp = stamp
+                self.solar_radiation_wm2 = radiation
+                self.temperature_c = 15.0
+                self.wind_speed_100m_ms = wind
+                self.cloud_cover_pct = 0.0
+
+        return [_Point(START + timedelta(hours=i), self.radiation, self.wind)
+                for i in range(48)]
+
+
+def _weather_document():
+    document = _document()
+    document["sources"] = [
+        {"source_id": "solar-roof", "name": "Roof array", "kind": "solar",
+         "capacity_kw": 500, "availability_method": "weather",
+         "latitude": 51.5074, "longitude": -0.1278, "evidence": "nameplate"},
+        {"source_id": "wind-farm", "name": "Wind farm", "kind": "wind",
+         "capacity_kw": 900, "availability_method": "weather",
+         "latitude": 52.9000, "longitude": -1.1500, "evidence": "contracted",
+         "delivery_type": "dedicated_wire"},
+    ]
+    return document
+
+
+def test_each_plant_is_forecast_at_its_own_coordinates():
+    """A wind farm fifty kilometres away has its own wind.
+
+    Using the data centre's weather for it would be a quietly wrong answer
+    rather than a missing one.
+    """
+    profile = site_profile.parse(_weather_document())
+    adapter = _FakeAdapter()
+    weather, warnings = site_profile.fetch_weather(
+        profile, _half_hours(), adapter=adapter)
+    assert warnings == []
+    assert set(weather) == {"solar-roof", "wind-farm"}
+    assert {(lat, lon) for lat, lon, _ in adapter.requests} == {
+        (51.5074, -0.1278), (52.9, -1.15)}
+
+
+def test_two_arrays_on_one_roof_cost_one_request():
+    document = _weather_document()
+    document["sources"][1].update({"source_id": "solar-roof-b",
+                                   "kind": "solar", "latitude": 51.5074,
+                                   "longitude": -0.1278,
+                                   "delivery_type": "onsite"})
+    adapter = _FakeAdapter()
+    site_profile.fetch_weather(site_profile.parse(document),
+                               _half_hours(), adapter=adapter)
+    assert len(adapter.requests) == 1
+
+
+def test_a_forecast_that_cannot_be_fetched_contributes_no_power():
+    """Fail closed: an unavailable forecast must not licence a schedule."""
+    profile = site_profile.parse(_weather_document())
+    adapter = _FakeAdapter(fail=True)
+    weather, warnings = site_profile.fetch_weather(
+        profile, _half_hours(), adapter=adapter)
+    assert weather == {}
+    assert any("contribute no power" in warning for warning in warnings)
+    envelope = dict(site_profile.power_envelope(profile, _half_hours(), weather))
+    assert set(envelope.values()) == {400.0}   # the import limit alone
+
+
+def test_real_weather_raises_the_ceiling_above_the_import_limit():
+    """The end of the loop: forecast becomes available power becomes headroom."""
+    profile = site_profile.parse(_weather_document())
+    weather, _ = site_profile.fetch_weather(
+        profile, _half_hours(), adapter=_FakeAdapter())
+    stamps = _half_hours()
+    envelope = dict(site_profile.power_envelope(profile, stamps, weather))
+    # 800 W/m2 of irradiance and 11 m/s of wind is a strong hour: the site
+    # can draw well beyond its 400 kW import limit.
+    assert max(envelope.values()) > 400.0
+
+
+def test_the_site_ceiling_is_not_the_import_limit():
+    """The bug this test exists to prevent, found by running the loop.
+
+    A site importing 1 kW while its own array produces 4 kW can draw 5 kW.
+    Compiling the import limit into `max_power_kw` capped the facility at its
+    grid connection and silently discarded every kilowatt of on-site
+    generation — the whole feature, defeated by one wrong field.
+    """
+    document = _document()
+    document["facility"]["max_import_kw"] = 1
+    document["sources"][0]["capacity_kw"] = 4
+    profile = site_profile.parse(document)
+    assert profile.electrical_limit_kw == 5
+    payload = site_profile.to_facility_payload(profile, _half_hours())
+    assert payload["max_power_kw"] == 5
+    assert max(payload["power_profile_kw"]) > 1
+
+
+def test_a_declared_switchgear_rating_wins_over_the_derived_one():
+    """An operator who knows their rating is a better source than arithmetic."""
+    document = _document()
+    document["facility"]["electrical_limit_kw"] = 250
+    profile = site_profile.parse(document)
+    assert profile.electrical_limit_kw == 250
+    payload = site_profile.to_facility_payload(profile, _half_hours())
+    assert max(payload["power_profile_kw"]) <= 250

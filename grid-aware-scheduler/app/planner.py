@@ -155,7 +155,7 @@ background:var(--card);color:var(--text);font:600 11px inherit;padding:7px 10px;
 {THEME_CONTROL}
 <header><h1>Placement Planner</h1>
 <p class="sub">Choose the hardware and half-hour that best satisfy an explicit operating objective.</p>
-<nav><a href="{html.escape(operations_href)}">Operations</a><a href="{html.escape(simulator_href)}">Fleet Lab</a><a class="on" href="/planner">Placement Lab</a><a href="{html.escape(grid_href)}">Sites &amp; Grid</a><a href="/decisions">Decisions</a></nav></header>
+<nav><a href="{html.escape(operations_href)}">Operations</a><a href="{html.escape(simulator_href)}">Fleet Lab</a><a class="on" href="/planner">Placement Lab</a><a href="{html.escape(grid_href)}">Sites &amp; Grid</a><a href="/site">Site</a><a href="/decisions">Decisions</a></nav></header>
 
 <section class="card"><h2>Operating constraints</h2>
 <p class="note">The selected location is a facility constraint. The planner searches every catalogued device and legal start window there.</p>

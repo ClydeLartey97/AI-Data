@@ -159,6 +159,7 @@ class SiteProfile:
     pue: float
     night_pue: float | None
     max_import_kw: float | None
+    declared_electrical_limit_kw: float | None
     facility_evidence: str
     sources: tuple[DeclaredSource, ...]
     battery: dict | None
@@ -178,6 +179,9 @@ class SiteProfile:
                 "pue": self.pue,
                 "night_pue": self.night_pue,
                 "max_import_kw": self.max_import_kw,
+                "electrical_limit_kw": self.electrical_limit_kw,
+                "electrical_limit_declared": (
+                    self.declared_electrical_limit_kw is not None),
                 "evidence": self.facility_evidence,
                 "provenance": EVIDENCE_TIERS[self.facility_evidence],
             },
@@ -205,6 +209,23 @@ class SiteProfile:
                 "physical interval energy balance."
             ),
         }
+
+
+    @property
+    def electrical_limit_kw(self) -> float:
+        """The most the site can draw at once, from any combination of supply.
+
+        Declared when the operator knows their switchgear rating; otherwise
+        derived as the import limit plus every kilowatt of physically
+        delivered generation, which is the most that could ever arrive at
+        once. It is deliberately not the import limit — a site importing
+        1 kW while its own array produces 4 kW can draw 5 kW.
+        """
+        if self.declared_electrical_limit_kw is not None:
+            return self.declared_electrical_limit_kw
+        return (self.max_import_kw or 0.0) + sum(
+            source.capacity_kw for source in self.sources
+            if source.delivery_type != "contractual")
 
 
 def parse(document: dict[str, Any]) -> SiteProfile:
@@ -248,6 +269,9 @@ def parse(document: dict[str, Any]) -> SiteProfile:
     max_import_kw = (None if facility_raw.get("max_import_kw") is None
                      else _number(facility_raw, "max_import_kw",
                                   where="facility", minimum=0))
+    declared_limit = (None if facility_raw.get("electrical_limit_kw") is None
+                      else _number(facility_raw, "electrical_limit_kw",
+                                   where="facility", minimum=0.000001))
 
     warnings: list[str] = []
     if facility_evidence == "metered" and not site["grid_connection_id"]:
@@ -392,7 +416,9 @@ def parse(document: dict[str, Any]) -> SiteProfile:
     return SiteProfile(
         version=version, site=site, market=market, location=location,
         base_load_kw=base_load_kw, pue=pue, night_pue=night_pue,
-        max_import_kw=max_import_kw, facility_evidence=facility_evidence,
+        max_import_kw=max_import_kw,
+        declared_electrical_limit_kw=declared_limit,
+        facility_evidence=facility_evidence,
         sources=tuple(sources), battery=battery, dispatch_priority=priority,
         declared_by=declared_by, declared_at=declared_at,
         warnings=tuple(warnings),
@@ -428,6 +454,56 @@ def _diurnal_factor(source: DeclaredSource, timestamp: datetime) -> float:
     return max(0.15, 0.6 + 0.25 * math.cos(distance / 12 * math.pi))
 
 
+def fetch_weather(profile: SiteProfile, timestamps: list[datetime],
+                  *, adapter: Any = None
+                  ) -> tuple[dict[str, dict[datetime, Any]], list[str]]:
+    """Forecast weather at each declared plant, keyed by source.
+
+    Sources are grouped by coordinate so two arrays on one roof cost one
+    request. Weather is per-plant and not per-site on purpose: a wind farm
+    fifty kilometres away has its own wind, and using the data centre's
+    weather for it would be a quietly wrong answer rather than a missing one.
+
+    A failed fetch returns a warning and no data for that source, which the
+    envelope then treats as no contribution. That is the fail-closed
+    direction: an unavailable forecast must never licence a schedule that
+    assumes generation.
+    """
+    from adapters.weather import Location, WeatherAdapter
+
+    needed = [source for source in profile.sources
+              if source.method == "weather" and source.latitude is not None]
+    if not needed:
+        return {}, []
+
+    adapter = adapter or WeatherAdapter()
+    span = max(timestamps) - min(timestamps)
+    days = max(1, min(16, int(span.total_seconds() // 86400) + 2))
+
+    by_place: dict[tuple[float, float], list[DeclaredSource]] = {}
+    for source in needed:
+        by_place.setdefault(
+            (round(source.latitude, 4), round(source.longitude, 4)), []
+        ).append(source)
+
+    weather: dict[str, dict[datetime, Any]] = {}
+    warnings: list[str] = []
+    for (latitude, longitude), sources in by_place.items():
+        try:
+            points = adapter.forecast(
+                Location(sources[0].name, latitude, longitude), days=days)
+        except Exception as exc:                       # noqa: BLE001
+            names = ", ".join(source.source_id for source in sources)
+            warnings.append(
+                f"weather forecast unavailable for {names}: {exc}; these "
+                "sources contribute no power until a forecast is available")
+            continue
+        indexed = {point.timestamp: point for point in points}
+        for source in sources:
+            weather[source.source_id] = indexed
+    return weather, warnings
+
+
 def _weather_factors(source: DeclaredSource, timestamps: list[datetime],
                      weather: dict[datetime, Any]) -> list[float]:
     factors = []
@@ -449,14 +525,20 @@ def _weather_factors(source: DeclaredSource, timestamps: list[datetime],
 
 
 def availability_kw(source: DeclaredSource, timestamps: list[datetime],
-                    weather: dict[datetime, Any] | None = None) -> list[float]:
-    """Expand one declaration into per-interval available power."""
+                    weather: dict[str, dict[datetime, Any]] | None = None
+                    ) -> list[float]:
+    """Expand one declaration into per-interval available power.
+
+    `weather` is keyed by source ID, not by timestamp alone, because each
+    declared plant has its own coordinates and therefore its own forecast.
+    """
     if source.method == "flat":
         factors = [1.0] * len(timestamps)
     elif source.method == "diurnal":
         factors = [_diurnal_factor(source, stamp) for stamp in timestamps]
     elif source.method == "weather":
-        factors = _weather_factors(source, timestamps, weather or {})
+        factors = _weather_factors(
+            source, timestamps, (weather or {}).get(source.source_id, {}))
     else:
         # A declared series shorter than the horizon repeats daily rather
         # than being padded with zeros, because a 24-hour shape is the usual
@@ -468,7 +550,7 @@ def availability_kw(source: DeclaredSource, timestamps: list[datetime],
 
 
 def power_envelope(profile: SiteProfile, timestamps: list[datetime],
-                   weather: dict[datetime, Any] | None = None,
+                   weather: dict[str, dict[datetime, Any]] | None = None,
                    *, electrical_limit_kw: float | None = None
                    ) -> list[tuple[datetime, float]]:
     """The ceiling on facility draw in each interval — the performance lever.
@@ -517,7 +599,7 @@ def power_envelope(profile: SiteProfile, timestamps: list[datetime],
 
 
 def to_facility_payload(profile: SiteProfile, timestamps: list[datetime],
-                        weather: dict[datetime, Any] | None = None,
+                        weather: dict[str, dict[datetime, Any]] | None = None,
                         *, max_power_kw: float | None = None
                         ) -> dict[str, Any]:
     """Compile the declaration into the request the planner already takes.
@@ -529,17 +611,29 @@ def to_facility_payload(profile: SiteProfile, timestamps: list[datetime],
     _require(bool(timestamps), "a facility payload needs at least one interval")
     night_pue = profile.night_pue if profile.night_pue is not None else profile.pue
     payload: dict[str, Any] = {
+        # The site's absolute ceiling, which is NOT the import limit: a site
+        # importing 1 kW while its own array produces 4 kW can draw 5 kW. Using
+        # the import limit here would cap the facility at the grid connection
+        # and discard every kilowatt of on-site generation.
         "max_power_kw": (max_power_kw if max_power_kw is not None
-                         else profile.max_import_kw or 0.0),
+                         else profile.electrical_limit_kw),
         "base_load_kw": profile.base_load_kw,
         "pue_profile": [
             profile.pue if 7 <= stamp.hour < 19 else night_pue
             for stamp in timestamps
         ],
-        "dispatch_priority": profile.dispatch_priority,
+        # The API's own name for the same setting. Emitting the document's
+        # wording here would silently fall back to the default.
+        "energy_priority": profile.dispatch_priority,
         "site": dict(profile.site),
         "energy_sources": [],
     }
+    limit = payload["max_power_kw"]
+    if limit:
+        payload["power_profile_kw"] = [
+            value for _, value in power_envelope(
+                profile, timestamps, weather, electrical_limit_kw=limit)
+        ]
     if profile.battery:
         payload["battery"] = dict(profile.battery)
 
