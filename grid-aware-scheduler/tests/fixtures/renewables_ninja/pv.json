@@ -1,0 +1,46 @@
+{
+ "metadata": {
+  "units": {
+   "time": "UTC",
+   "electricity": "kW"
+  },
+  "params": {
+   "lat": "51.5",
+   "lon": "-0.12",
+   "date_from": "2023-06-01",
+   "date_to": "2023-06-01",
+   "dataset": "merra2",
+   "capacity": "1.0",
+   "system_loss": "0.1",
+   "tracking": "0",
+   "tilt": "35",
+   "azim": "180"
+  }
+ },
+ "data": {
+  "1685577600000": {
+   "electricity": 0.0
+  },
+  "1685581200000": {
+   "electricity": 0.0
+  },
+  "1685584800000": {
+   "electricity": 0.0
+  },
+  "1685588400000": {
+   "electricity": 0.0
+  },
+  "1685592000000": {
+   "electricity": 0.002
+  },
+  "1685595600000": {
+   "electricity": 0.048
+  },
+  "1685599200000": {
+   "electricity": 0.149
+  },
+  "1685602800000": {
+   "electricity": 0.353
+  }
+ }
+}

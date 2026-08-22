@@ -62,3 +62,6 @@ grid-aware-scheduler/.runtime/
 grid-aware-scheduler/build/
 grid-aware-scheduler/dist/
 *.egg-info/
+
+# Renewables.ninja response cache (rate limit is 50/hour — do not refetch)
+grid-aware-scheduler/data/cache/ninja/

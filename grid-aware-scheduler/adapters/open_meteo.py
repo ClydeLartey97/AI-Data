@@ -23,6 +23,10 @@ import pandas as pd
 import requests
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+#: ERA5 reanalysis. Same response shape as the forecast, different horizon —
+#: which is what lets the local generation model be scored over history against
+#: a reference simulation before it is trusted to place a job in the future.
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
 #: Transient by nature — a retry may succeed. Any other 4xx/5xx is a real
 #: failure and is raised immediately rather than retried into a timeout.
@@ -107,16 +111,36 @@ def _to_frame(payload: dict) -> pd.DataFrame:
                                                     ignore_index=True)
 
 
+def _base_params() -> dict:
+    return {
+        "hourly": ",".join(_HOURLY_VARIABLES),
+        "wind_speed_unit": "ms",   # turbine power curves are stated in m/s
+        "timezone": "UTC",         # keep everything on the UTC spine
+    }
+
+
 def fetch_forecast(latitude: float, longitude: float, *, days: int = 7,
                    client: OpenMeteoClient | None = None) -> pd.DataFrame:
     """Hourly weather forecast for a point, out to ``days`` ahead (max 16)."""
     client = client or OpenMeteoClient()
     payload = client.get(FORECAST_URL, {
-        "hourly": ",".join(_HOURLY_VARIABLES),
-        "wind_speed_unit": "ms",   # turbine power curves are stated in m/s
-        "timezone": "UTC",         # keep everything on the UTC spine
+        **_base_params(),
         "latitude": latitude,
         "longitude": longitude,
         "forecast_days": days,
+    })
+    return _to_frame(payload)
+
+
+def fetch_archive(latitude: float, longitude: float, start, end,
+                  client: OpenMeteoClient | None = None) -> pd.DataFrame:
+    """Hourly ERA5 reanalysis weather for a point over a past date range."""
+    client = client or OpenMeteoClient()
+    payload = client.get(ARCHIVE_URL, {
+        **_base_params(),
+        "latitude": latitude,
+        "longitude": longitude,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
     })
     return _to_frame(payload)

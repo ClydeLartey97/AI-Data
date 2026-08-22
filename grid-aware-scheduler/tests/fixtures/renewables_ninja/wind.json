@@ -1,0 +1,44 @@
+{
+ "metadata": {
+  "units": {
+   "time": "UTC",
+   "electricity": "kW"
+  },
+  "params": {
+   "lat": "51.5",
+   "lon": "-0.12",
+   "date_from": "2023-06-01",
+   "date_to": "2023-06-01",
+   "dataset": "merra2",
+   "capacity": "1.0",
+   "height": "100",
+   "turbine": "Vestas V90 2000"
+  }
+ },
+ "data": {
+  "1685577600000": {
+   "electricity": 0.494
+  },
+  "1685581200000": {
+   "electricity": 0.494
+  },
+  "1685584800000": {
+   "electricity": 0.494
+  },
+  "1685588400000": {
+   "electricity": 0.48
+  },
+  "1685592000000": {
+   "electricity": 0.464
+  },
+  "1685595600000": {
+   "electricity": 0.466
+  },
+  "1685599200000": {
+   "electricity": 0.419
+  },
+  "1685602800000": {
+   "electricity": 0.374
+  }
+ }
+}
