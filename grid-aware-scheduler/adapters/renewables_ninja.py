@@ -40,6 +40,8 @@ from pathlib import Path
 
 import requests
 
+from core import secrets
+
 BASE_URL = "https://www.renewables.ninja/api"
 TOKEN_ENV_VAR = "RENEWABLES_NINJA_TOKEN"
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
@@ -90,6 +92,7 @@ class SimulatedPoint:
 
 
 def has_token() -> bool:
+    secrets.load_env_file()
     return bool(os.environ.get(TOKEN_ENV_VAR))
 
 
@@ -157,11 +160,14 @@ class RenewablesNinjaClient:
                  max_attempts: int = 3, backoff_seconds: float = 2.0,
                  cache_dir: Path | None = None,
                  session: requests.Session | None = None) -> None:
+        if not token:
+            secrets.load_env_file()
         self._token = token or os.environ.get(TOKEN_ENV_VAR)
         if not self._token:
             raise NinjaAuthError(
-                f"No Renewables.ninja token. Set {TOKEN_ENV_VAR} — registration "
-                "is free at renewables.ninja and takes a minute.")
+                f"No Renewables.ninja token. Put {TOKEN_ENV_VAR}=<token> in "
+                f"{secrets.DEFAULT_ENV_FILE} (gitignored), or export it. "
+                "Registration is free at renewables.ninja and takes a minute.")
         self._timeout_seconds = timeout_seconds
         self._max_attempts = max_attempts
         self._backoff_seconds = backoff_seconds
