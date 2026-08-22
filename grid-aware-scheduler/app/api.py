@@ -22,7 +22,10 @@ from core.portfolio import (PortfolioJob, PortfolioPolicy, SiteCapacity,
 from hardware.calibration import CalibrationProfile
 
 API_VERSION = "v1"
-PRODUCT_VERSION = "0.12.0"
+#: Single source of truth for the version. pyproject.toml reads this attribute
+#: rather than restating it, so a released package can never disagree with what
+#: the health endpoint tells an operator it is running.
+PRODUCT_VERSION = "0.13.0"
 MAX_ALTERNATIVES = 100
 
 

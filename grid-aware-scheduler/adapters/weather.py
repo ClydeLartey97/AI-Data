@@ -12,24 +12,15 @@ own operator forecast is too good to beat, but CAISO and ERCOT have no free
 transparent equivalent, and weather is the input any such model is built on.
 This is the feed that work would start from.
 
-Open-Meteo, via the National Grid Tool's client. Public, keyless, worldwide —
-so unlike the GB carbon endpoints, this one already works for the markets that
-do not have adapters yet.
+Open-Meteo. Public, keyless, worldwide — so unlike the GB carbon endpoints,
+this one already works for the markets that do not have adapters yet.
 """
 from __future__ import annotations
 
-import os
-import sys
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 
-_DEFAULT_NGT_PATH = Path(__file__).resolve().parents[2] / "National-Grid-Tool"
-_NGT_PATH = Path(os.environ.get("NATIONAL_GRID_TOOL_PATH", _DEFAULT_NGT_PATH))
-if str(_NGT_PATH) not in sys.path:
-    sys.path.insert(0, str(_NGT_PATH))
-
-from sources.weather.open_meteo import OpenMeteoClient, fetch_forecast  # noqa: E402
+from adapters.open_meteo import OpenMeteoClient, fetch_forecast
 
 #: Rough cut-in / rated speeds for a typical utility-scale turbine, at 100 m.
 #: Used only to say "windy enough to generate" in plain language — this is a

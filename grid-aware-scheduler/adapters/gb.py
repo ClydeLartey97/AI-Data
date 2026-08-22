@@ -25,28 +25,12 @@ settled values are for scoring a schedule after the fact, never for making it.
 """
 from __future__ import annotations
 
-import os
-import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 import pandas as pd
 
-_DEFAULT_NGT_PATH = Path(__file__).resolve().parents[2] / "National-Grid-Tool"
-_NGT_PATH = Path(os.environ.get("NATIONAL_GRID_TOOL_PATH", _DEFAULT_NGT_PATH))
-if str(_NGT_PATH) not in sys.path:
-    sys.path.insert(0, str(_NGT_PATH))
-
-try:
-    from sources.carbon_intensity.client import fetch_intensity_for_date
-    from sources.elexon.prices import fetch_market_index_range
-except ImportError as exc:  # pragma: no cover - clearer than a raw ImportError
-    raise ImportError(
-        f"Could not import National Grid Tool clients from {_NGT_PATH}. "
-        "Set NATIONAL_GRID_TOOL_PATH to point at that project."
-    ) from exc
-
+from adapters import national_grid_tool
 from adapters.base_adapter import GridDataPoint, MarketAdapter
 
 # Elexon's MID endpoint caps its window at 7 days and widens it a day either
@@ -74,6 +58,8 @@ class GBPoint(GridDataPoint):
 
 
 def _fetch_carbon_range(start_date: date, end_date: date) -> pd.DataFrame:
+    fetch_intensity_for_date, = national_grid_tool.load(
+        "sources.carbon_intensity.client", "fetch_intensity_for_date")
     frames, day = [], start_date
     while day <= end_date:
         frames.append(fetch_intensity_for_date(day))
@@ -82,6 +68,8 @@ def _fetch_carbon_range(start_date: date, end_date: date) -> pd.DataFrame:
 
 
 def _fetch_price_range(start_date: date, end_date: date) -> pd.DataFrame:
+    fetch_market_index_range, = national_grid_tool.load(
+        "sources.elexon.prices", "fetch_market_index_range")
     frames, day = [], start_date
     while day <= end_date:
         chunk_end = min(day + timedelta(days=_MID_CHUNK_DAYS - 1), end_date)

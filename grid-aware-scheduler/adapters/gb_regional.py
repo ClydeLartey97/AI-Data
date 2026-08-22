@@ -25,18 +25,10 @@ Endpoints used (all public, keyless, api.carbonintensity.org.uk):
 """
 from __future__ import annotations
 
-import os
-import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 
-_DEFAULT_NGT_PATH = Path(__file__).resolve().parents[2] / "National-Grid-Tool"
-_NGT_PATH = Path(os.environ.get("NATIONAL_GRID_TOOL_PATH", _DEFAULT_NGT_PATH))
-if str(_NGT_PATH) not in sys.path:
-    sys.path.insert(0, str(_NGT_PATH))
-
-from sources.carbon_intensity.client import CarbonIntensityClient  # noqa: E402
+from adapters import national_grid_tool
 
 #: The Carbon Intensity API's own banding. Kept as published rather than
 #: rebucketed, so the UI reports the operator's judgement, not ours.
@@ -111,13 +103,25 @@ def _region_from(entry: dict, inner: dict | None = None) -> RegionSignal:
 class GBRegionalAdapter:
     """Location-aware GB carbon intensity. Carbon only — see module docstring."""
 
-    def __init__(self, client: CarbonIntensityClient | None = None, *,
+    def __init__(self, client: object | None = None, *,
                  timeout_seconds: float = 30.0,
                  max_attempts: int = 3) -> None:
-        self._client = client or CarbonIntensityClient(
-            timeout_seconds=timeout_seconds,
-            max_attempts=max_attempts,
-        )
+        # Built on first request, not here: constructing an adapter must not
+        # require the National Grid Tool on a machine that only plans US
+        # markets. ``client`` is a CarbonIntensityClient when supplied.
+        self._client = client
+        self._timeout_seconds = timeout_seconds
+        self._max_attempts = max_attempts
+
+    def _get(self, path: str) -> dict:
+        if self._client is None:
+            CarbonIntensityClient, = national_grid_tool.load(
+                "sources.carbon_intensity.client", "CarbonIntensityClient")
+            self._client = CarbonIntensityClient(
+                timeout_seconds=self._timeout_seconds,
+                max_attempts=self._max_attempts,
+            )
+        return self._client.get(path)
 
     @property
     def market_name(self) -> str:
@@ -125,7 +129,7 @@ class GBRegionalAdapter:
 
     def regions(self) -> list[RegionSignal]:
         """All 18 GB grid regions, right now."""
-        data = self._client.get("regional").get("data", [])
+        data = self._get("regional").get("data", [])
         entries = data[0].get("regions", []) if data else []
         return [_region_from(e) for e in entries]
 
@@ -137,7 +141,7 @@ class GBRegionalAdapter:
         through: "sw1a 1aa" -> "SW1A".
         """
         code = _outward(outcode)
-        payload = self._client.get(f"regional/postcode/{code}")
+        payload = self._get(f"regional/postcode/{code}")
         entry = payload.get("data", [{}])[0]
         inner = (entry.get("data") or [{}])[0]
         region = _region_from(entry, inner)
@@ -154,7 +158,7 @@ class GBRegionalAdapter:
         """
         moment = (start or datetime.now(timezone.utc)).astimezone(timezone.utc)
         stamp = moment.strftime("%Y-%m-%dT%H:%MZ")
-        payload = self._client.get(f"regional/intensity/{stamp}/fw48h/regionid/{region_id}")
+        payload = self._get(f"regional/intensity/{stamp}/fw48h/regionid/{region_id}")
         entry = payload.get("data", {})
         rows = entry.get("data", []) if isinstance(entry, dict) else entry
         out = []

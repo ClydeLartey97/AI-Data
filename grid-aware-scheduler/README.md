@@ -7,27 +7,34 @@ carbon data.
 
 **→ Read [`HANDOFF.md`](HANDOFF.md) first.** It is the single source of truth: full state, prior art, design decisions, measured findings, and everything still outstanding. Keep it current at the end of every session.
 
-## Run it
-
-On the configured Mac, open **Grid-Aware Scheduler.app** from the Desktop. The
-launcher reuses a healthy local process or starts one, waits for its health
-check, and opens the product. It does not expose the server to the network.
-
-To install or rebuild that launcher once:
+## Install it
 
 ```bash
-~/venvs/national-grid/bin/python scripts/install_launcher.py
+python3 -m venv .venv
+.venv/bin/pip install .
+.venv/bin/grid-aware-scheduler          # http://localhost:8765
 ```
 
-The equivalent terminal command is:
+Three dependencies — `pandas`, `requests`, `psutil`. Everything else is
+standard library. CAISO, NYISO and MISO work immediately: each talks to its
+market operator directly, and none of them needs a key.
 
-```bash
-python3 -m venv ~/venvs/national-grid
-~/venvs/national-grid/bin/python -m pip install -r "../National-Grid-Tool/requirements.txt"
+**GB is the one exception.** Its price and carbon come through a sibling
+checkout of the National Grid Tool, which already had tested Elexon and Carbon
+Intensity clients. That import is deferred to the first GB fetch, so a machine
+that only plans US markets never needs the folder. To enable GB, check that
+project out beside this one or point `NATIONAL_GRID_TOOL_PATH` at it, then
+install its requirements into the same environment.
 
-~/venvs/national-grid/bin/python -m core.backfill --days 400   # one-time, ~2 min
-~/venvs/national-grid/bin/python -m app.serve                  # http://localhost:8765
-```
+Apple-silicon measurement is optional and separate — `pip install '.[apple]'`
+pulls MLX. It is needed only to *produce* `MEASURED` profiles; planning against
+published or catalogue figures needs none of it.
+
+On the configured Mac, **Grid-Aware Scheduler.app** on the Desktop does the
+same thing without a terminal: it reuses a healthy local process or starts one,
+waits for its health check, and opens the product. Rebuild it with
+`python scripts/install_launcher.py`. Optionally prime the local cache once
+with `python -m core.backfill --days 400` (about two minutes).
 
 The local product has five linked operator surfaces:
 

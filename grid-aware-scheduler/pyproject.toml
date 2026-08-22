@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "grid-aware-scheduler"
+dynamic = ["version"]
+description = "Decides which accelerator runs which AI workload, where and when, against measured hardware and real electricity price and carbon signals."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Clyde Lartey" }]
+
+# Deliberately three. Everything else the product needs — the HTTP server,
+# JSON, SQLite, TLS, the charts — is standard library, which is why the whole
+# thing installs in seconds and has nothing to break on a version bump.
+dependencies = [
+    "pandas>=2.0",
+    "requests>=2.31",
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+# Apple-silicon measurement. Only needed to run the benchmark collectors that
+# produce MEASURED profiles; planning against published or catalogue figures
+# needs none of it, and these wheels do not exist for non-Apple platforms.
+apple = [
+    "mlx>=0.32",
+    "mlx-lm>=0.31",
+]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+grid-aware-scheduler = "app.serve:main"
+
+[project.urls]
+Repository = "https://github.com/ClydeLartey97/AI-Data"
+
+[tool.setuptools]
+packages = ["adapters", "app", "core", "hardware"]
+
+[tool.setuptools.dynamic]
+version = { attr = "app.api.PRODUCT_VERSION" }
+
+[tool.setuptools.package-data]
+app = ["static/vendor/*.js"]

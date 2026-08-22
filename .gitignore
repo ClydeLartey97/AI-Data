@@ -57,3 +57,8 @@ env/
 
 # local application process state and logs
 grid-aware-scheduler/.runtime/
+
+# python build artefacts from `pip install .`
+grid-aware-scheduler/build/
+grid-aware-scheduler/dist/
+*.egg-info/

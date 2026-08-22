@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from adapters.base_adapter import GridDataPoint
-from app.api import (market_response, plan_response, portfolio_response,
-                     score_response)
+from app.api import (PRODUCT_VERSION, market_response, plan_response,
+                     portfolio_response, score_response)
 from app.markets import MarketContext, market_locations
 from core.evidence import (EvidenceProfile, QualityEvidence, WorkloadObservation,
                            build_evidence_profile)
@@ -77,7 +77,7 @@ def _portfolio_payload() -> dict:
 def test_plan_api_returns_versioned_auditable_result():
     response = plan_response(_payload(), _context())
     assert response["api_version"] == "v1"
-    assert response["product_version"] == "0.12.0"
+    assert response["product_version"] == PRODUCT_VERSION
     assert response["algorithm"] == "exact-enumeration-v1"
     assert response["selected"]["hardware"] == "8x H100 SXM"
     assert response["selected"]["start"].endswith("+00:00")
