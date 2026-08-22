@@ -40,6 +40,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core import generation
 from core.energy import DELIVERY_TYPES, DISPATCH_PRIORITIES, SOURCE_KINDS
 from core.renewables import solar_capacity_factor, wind_capacity_factor
 
@@ -56,12 +57,17 @@ EVIDENCE_TIERS = {
 }
 
 #: How availability over time is derived from a declared capacity.
-AVAILABILITY_METHODS = {"flat", "diurnal", "weather", "series"}
+AVAILABILITY_METHODS = {"flat", "diurnal", "weather", "series", "plant"}
 
 #: Methods that model a shape rather than observe one. A modelled shape is
 #: ESTIMATED even when the capacity behind it is metered, because the shape
 #: is where the error lives.
 MODELLED_METHODS = {"diurnal", "weather"}
+
+#: Availability read from the plant's own declaration to the system operator
+#: rather than modelled. Not a measurement at our meter, but not a guess
+#: either: the operator of the plant filed it, and an outage appears in it.
+REPORTED_PROVENANCE = "REPORTED"
 
 MAX_SOURCES = 30
 
@@ -129,8 +135,17 @@ class DeclaredSource:
     cost_per_mwh: float = 0.0
     carbon_g_per_kwh: float = 0.0
     confidence: float = 1.0
+    #: Fraction of nameplate this plant delivers when running normally, after
+    #: forced and planned outages. Distinct from `confidence`, which derates a
+    #: forecast nobody trusts; this derates the plant itself.
+    availability_factor: float = 1.0
     peak_hour: float = 12.0
     capacity_factors: tuple[float, ...] = ()
+    #: The plant's identity in its market's own register — a GB BM Unit id
+    #: such as "T_SIZB-1". Coordinates locate a station well enough to fetch
+    #: its weather, but two units share a station's coordinates and can have
+    #: completely different availability, so identity has to be the unit.
+    plant_id: str = ""
     latitude: float | None = None
     longitude: float | None = None
     grid_connection_id: str = ""
@@ -144,6 +159,8 @@ class DeclaredSource:
         capacity is known: the operator may have metered the array, but
         nobody has metered tomorrow.
         """
+        if self.method == "plant":
+            return REPORTED_PROVENANCE
         if self.method in MODELLED_METHODS:
             return "ESTIMATED"
         return EVIDENCE_TIERS[self.evidence]
@@ -190,6 +207,15 @@ class SiteProfile:
                     "source_id": source.source_id, "name": source.name,
                     "kind": source.kind, "capacity_kw": source.capacity_kw,
                     "availability_method": source.method,
+                    "availability_factor": source.availability_factor,
+                    # Whether the shape came from a real forecast or from the
+                    # declared availability. An operator surface must be able
+                    # to tell these apart at a glance.
+                    "weather_modelled": (
+                        source.method == "weather"
+                        and generation.can_model_from_weather(source.kind)),
+                    "has_peak_worth_scheduling_into": (
+                        source.kind in generation.MUST_RUN_VARIABLE_KINDS),
                     "delivery_type": source.delivery_type,
                     "physical": source.delivery_type != "contractual",
                     "evidence": source.evidence,
@@ -321,7 +347,19 @@ def parse(document: dict[str, Any]) -> SiteProfile:
         longitude = (None if longitude_raw is None
                      else _number(raw, "longitude", where=where,
                                   minimum=-180, maximum=180))
-        if method == "weather":
+        # Only demand coordinates when a forecast will actually be fetched.
+        # A nuclear or hydro plant declared with 'weather' falls back to its
+        # declared availability and is warned about below, so insisting on a
+        # location for a request that never happens would refuse a valid
+        # declaration over an unused field.
+        if method == "plant":
+            _require(bool(_text(raw, "plant_id", where=where, required=False)),
+                     f"{where}: availability_method 'plant' needs 'plant_id' — "
+                     "the unit's id in its market register, such as a GB BM "
+                     "Unit id like 'T_SIZB-1'. A station's coordinates are not "
+                     "enough: two units share them and can differ completely.")
+
+        if method == "weather" and generation.can_model_from_weather(kind):
             _require(latitude is not None,
                      f"{where}: availability_method 'weather' needs the "
                      "source's own coordinates to fetch a forecast for")
@@ -350,6 +388,12 @@ def parse(document: dict[str, Any]) -> SiteProfile:
                 f"{source_id}: declared onsite but evidenced by contract — "
                 "check whether this is a dedicated wire or a market instrument")
 
+        # Asking for a forecast that cannot be made must be visible. The
+        # fallback is the declared availability, not full nameplate.
+        note = generation.availability_note(kind, method)
+        if note:
+            warnings.append(f"{source_id}: {note}")
+
         source = DeclaredSource(
             source_id=source_id,
             name=_text(raw, "name", where=where),
@@ -368,9 +412,13 @@ def parse(document: dict[str, Any]) -> SiteProfile:
                                      default=0, minimum=0),
             confidence=_number(raw, "confidence", where=where, default=1.0,
                                minimum=0, maximum=1),
+            availability_factor=_number(raw, "availability_factor",
+                                        where=where, default=1.0,
+                                        minimum=0, maximum=1),
             peak_hour=_number(raw, "peak_hour", where=where, default=12.0,
                               minimum=0, maximum=23.99),
             capacity_factors=factors,
+            plant_id=_text(raw, "plant_id", where=where, required=False),
             latitude=latitude,
             longitude=longitude,
             grid_connection_id=connection,
@@ -506,34 +554,55 @@ def fetch_weather(profile: SiteProfile, timestamps: list[datetime],
 
 def _weather_factors(source: DeclaredSource, timestamps: list[datetime],
                      weather: dict[datetime, Any]) -> list[float]:
+    """Per-interval capacity factor from a real forecast.
+
+    A kind with no weather model falls back to the source's declared
+    availability rather than to full output. That fallback used to be a silent
+    1.0, which reported a nuclear unit mid-refuelling and a becalmed hydro
+    scheme as producing nameplate in every interval. `parse` raises a warning
+    naming any source that lands here, so the substitution is visible.
+    """
+    if not generation.can_model_from_weather(source.kind):
+        return [source.availability_factor] * len(timestamps)
+
+    # What a missing forecast hour means depends on the plant, and getting this
+    # backwards is a real error in both directions. For solar and wind the
+    # forecast *is* the output, so an unavailable forecast fails closed to zero
+    # — it must never licence a schedule that assumes generation. For a
+    # dispatchable machine the forecast only supplies a temperature derate; the
+    # turbine is still installed and still able to run, so falling to zero
+    # would report a working plant as offline.
+    missing = (0.0 if source.kind in generation.MUST_RUN_VARIABLE_KINDS
+               else source.availability_factor)
+
     factors = []
     for stamp in timestamps:
         point = weather.get(stamp) or weather.get(stamp.replace(minute=0))
-        if point is None:
-            factors.append(0.0)
-            continue
-        if source.kind == "solar":
-            factors.append(solar_capacity_factor(
-                getattr(point, "solar_radiation_wm2", None),
-                getattr(point, "temperature_c", None)))
-        elif source.kind == "wind":
-            factors.append(wind_capacity_factor(
-                getattr(point, "wind_speed_100m_ms", None)))
-        else:
-            factors.append(1.0)
+        factor = generation.weather_capacity_factor(source.kind, point)
+        factors.append(missing if factor is None else factor)
     return factors
 
 
 def availability_kw(source: DeclaredSource, timestamps: list[datetime],
-                    weather: dict[str, dict[datetime, Any]] | None = None
+                    weather: dict[str, dict[datetime, Any]] | None = None,
+                    plant_data: dict[str, dict[datetime, float]] | None = None
                     ) -> list[float]:
     """Expand one declaration into per-interval available power.
 
-    `weather` is keyed by source ID, not by timestamp alone, because each
-    declared plant has its own coordinates and therefore its own forecast.
+    `weather` and `plant_data` are both keyed by source ID rather than by
+    timestamp alone, because each declared plant has its own coordinates and
+    its own market identity, and therefore its own series.
     """
+    if source.method == "plant":
+        # Absolute kW straight from the plant's own declaration, not a factor
+        # applied to nameplate. A half hour the unit did not report is treated
+        # as unavailable: for a plant we are physically connected to, silence
+        # is not permission to assume it is generating.
+        reported = (plant_data or {}).get(source.source_id, {})
+        return [reported.get(stamp, 0.0) for stamp in timestamps]
+
     if source.method == "flat":
-        factors = [1.0] * len(timestamps)
+        factors = [source.availability_factor] * len(timestamps)
     elif source.method == "diurnal":
         factors = [_diurnal_factor(source, stamp) for stamp in timestamps]
     elif source.method == "weather":
@@ -549,9 +618,46 @@ def availability_kw(source: DeclaredSource, timestamps: list[datetime],
     return [source.capacity_kw * factor for factor in factors]
 
 
+def fetch_plant_data(profile: SiteProfile, timestamps: list[datetime]
+                     ) -> tuple[dict[str, dict[datetime, float]], list[str]]:
+    """Declared availability for every source that names a market unit.
+
+    Fails closed per source, matching `fetch_weather`: a unit whose data
+    cannot be retrieved contributes nothing and says so, because an
+    unavailable reading must never licence a schedule that assumes the plant
+    is running.
+    """
+    wanted = [s for s in profile.sources if s.method == "plant"]
+    if not wanted:
+        return {}, []
+
+    out: dict[str, dict[datetime, float]] = {}
+    warnings: list[str] = []
+    if profile.market != "GB":
+        return {}, [
+            f"{len(wanted)} source(s) declare availability_method 'plant', "
+            f"which currently only resolves in GB through Elexon per-unit "
+            f"balancing data. Market is {profile.market}; those sources "
+            f"contribute no power."]
+
+    from adapters import gb_plant
+    for source in wanted:
+        try:
+            out[source.source_id] = gb_plant.availability_by_timestamp(
+                source.plant_id, timestamps)
+        except Exception as exc:  # noqa: BLE001 - fail closed, keep the reason
+            out[source.source_id] = {}
+            warnings.append(
+                f"{source.source_id}: could not read declared availability "
+                f"for unit {source.plant_id} ({type(exc).__name__}); it "
+                f"contributes no power this run.")
+    return out, warnings
+
+
 def power_envelope(profile: SiteProfile, timestamps: list[datetime],
                    weather: dict[str, dict[datetime, Any]] | None = None,
-                   *, electrical_limit_kw: float | None = None
+                   *, electrical_limit_kw: float | None = None,
+                   plant_data: dict[str, dict[datetime, float]] | None = None
                    ) -> list[tuple[datetime, float]]:
     """The ceiling on facility draw in each interval — the performance lever.
 
@@ -587,7 +693,7 @@ def power_envelope(profile: SiteProfile, timestamps: list[datetime],
     for source in profile.sources:
         if source.delivery_type == "contractual":
             continue
-        served = availability_kw(source, timestamps, weather)
+        served = availability_kw(source, timestamps, weather, plant_data)
         loss = 1.0 - source.delivery_loss_percent / 100
         onsite.append([value * source.confidence * loss for value in served])
 
@@ -600,6 +706,7 @@ def power_envelope(profile: SiteProfile, timestamps: list[datetime],
 
 def to_facility_payload(profile: SiteProfile, timestamps: list[datetime],
                         weather: dict[str, dict[datetime, Any]] | None = None,
+                        plant_data: dict[str, dict[datetime, float]] | None = None,
                         *, max_power_kw: float | None = None
                         ) -> dict[str, Any]:
     """Compile the declaration into the request the planner already takes.
@@ -642,7 +749,8 @@ def to_facility_payload(profile: SiteProfile, timestamps: list[datetime],
             "source_id": source.source_id,
             "name": source.name,
             "kind": source.kind,
-            "availability_kw": availability_kw(source, timestamps, weather),
+            "availability_kw": availability_kw(source, timestamps, weather,
+                                              plant_data),
             "cost_per_mwh": source.cost_per_mwh,
             "carbon_g_per_kwh": source.carbon_g_per_kwh,
             "confidence": source.confidence,
