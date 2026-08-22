@@ -76,7 +76,7 @@ def _m(key, name, family, params, active=None, notes="",
                  confidence=confidence, open_weights=open_weights)
 
 
-CATALOG: dict[str, Model] = {m.key: m for m in [
+CATALOGUE: dict[str, Model] = {m.key: m for m in [
     # --- Llama ------------------------------------------------------------
     _m("llama32-1b", "Llama 3.2 1B", "Llama", 1.2),
     _m("llama32-3b", "Llama 3.2 3B", "Llama", 3.2),
@@ -140,7 +140,7 @@ CATALOG: dict[str, Model] = {m.key: m for m in [
 
 def families() -> list[str]:
     seen, out = set(), []
-    for m in CATALOG.values():
+    for m in CATALOGUE.values():
         if m.family not in seen:
             seen.add(m.family)
             out.append(m.family)
@@ -148,9 +148,9 @@ def families() -> list[str]:
 
 
 def get(key: str) -> Model:
-    if key not in CATALOG:
+    if key not in CATALOGUE:
         raise KeyError(f"unknown model {key!r}")
-    return CATALOG[key]
+    return CATALOGUE[key]
 
 
 def custom(params_b: float, *, active_params_b: float | None = None,
@@ -166,7 +166,7 @@ def custom(params_b: float, *, active_params_b: float | None = None,
                  precision=precision, notes="User-specified")
 
 # --- appended: wider catalogue ------------------------------------------
-CATALOG.update({m.key: m for m in [
+CATALOGUE.update({m.key: m for m in [
     # Llama earlier + Llama 4
     _m("llama2-7b", "Llama 2 7B", "Llama", 6.7),
     _m("llama2-13b", "Llama 2 13B", "Llama", 13.0),

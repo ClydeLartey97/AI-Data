@@ -8,7 +8,7 @@ from adapters.base_adapter import GridDataPoint
 from core.estimator import (GridLocation, WorkloadSpec, estimate_device,
                             memory_required_gb, plan_workload)
 from core.planner import PlanningRequest
-from hardware import catalog
+from hardware import catalogue
 
 
 def _grid(prices=(50, 50, 10, 10)) -> GridLocation:
@@ -27,7 +27,7 @@ def test_training_memory_uses_explicit_state_bytes_and_headroom():
         activation_buffer_headroom=0.2,
     )
     assert memory_required_gb(spec) == pytest.approx(153.6)
-    sharded = estimate_device(spec, catalog.CATALOG["h100-sxm"])
+    sharded = estimate_device(spec, catalogue.CATALOGUE["h100-sxm"])
     assert sharded.memory_ok is True
     replicated_spec = WorkloadSpec(
         "llama31-8b", "training", "bf16", 1e6, 8,
@@ -35,7 +35,7 @@ def test_training_memory_uses_explicit_state_bytes_and_headroom():
         training_state_bytes_per_param=16,
         activation_buffer_headroom=0.2,
     )
-    assert estimate_device(replicated_spec, catalog.CATALOG["h100-sxm"]).memory_ok is False
+    assert estimate_device(replicated_spec, catalogue.CATALOGUE["h100-sxm"]).memory_ok is False
 
 
 def test_kv_cache_precision_is_independent_of_weight_precision():

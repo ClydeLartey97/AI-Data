@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hardware import catalog
+from hardware import catalogue
 
 DEFAULT_PATH = Path(__file__).resolve().parents[1] / "data" / "calibration" / "profiles.json"
 MIN_SAMPLES = 3
@@ -35,7 +35,7 @@ class CalibrationObservation:
     observed_at: datetime
 
     def __post_init__(self) -> None:
-        if self.device_key not in catalog.CATALOG:
+        if self.device_key not in catalogue.CATALOGUE:
             raise ValueError(f"unknown device {self.device_key!r}")
         if self.task not in ("training", "inference"):
             raise ValueError("task must be training or inference")
@@ -76,7 +76,7 @@ class CalibrationProfile:
     provenance: str = "MEASURED"
 
     def __post_init__(self) -> None:
-        if self.device_key not in catalog.CATALOG:
+        if self.device_key not in catalogue.CATALOGUE:
             raise ValueError(f"unknown device {self.device_key!r}")
         if self.task not in ("training", "inference"):
             raise ValueError("task must be training or inference")

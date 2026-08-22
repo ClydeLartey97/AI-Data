@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from hardware import catalog
+from hardware import catalogue
 from hardware.base import Fleet, Group, Provenance
 
 
@@ -80,9 +80,9 @@ class DetectionResult:
         """Build a fleet while preserving catalogue performance provenance."""
         groups: list[Group] = []
         for evidence in self.devices:
-            if not evidence.catalog_key or evidence.catalog_key not in catalog.CATALOG:
+            if not evidence.catalog_key or evidence.catalog_key not in catalogue.CATALOGUE:
                 continue
-            device = catalog.CATALOG[evidence.catalog_key]
+            device = catalogue.CATALOGUE[evidence.catalog_key]
             if evidence.memory_gb is not None:
                 device = replace(device, memory_gb=evidence.memory_gb)
             groups.append(Group(device, evidence.count))
@@ -150,7 +150,7 @@ class LocalDetector(HardwareProvider):
             "Throughput and power remain catalogue estimates",
         )))
         performance = (
-            catalog.CATALOG[key].provenance.value if key in catalog.CATALOG
+            catalogue.CATALOGUE[key].provenance.value if key in catalogue.CATALOGUE
             else "UNAVAILABLE"
         )
         return [DetectedDevice(
@@ -189,7 +189,7 @@ class LocalDetector(HardwareProvider):
                 power_provenance=(Provenance.MEASURED.value if power is not None
                                   else "UNAVAILABLE"),
                 performance_provenance=(
-                    catalog.CATALOG[key].provenance.value if key else "UNAVAILABLE"
+                    catalogue.CATALOGUE[key].provenance.value if key else "UNAVAILABLE"
                 ),
                 source="nvidia-smi",
                 notes=("Live power is one observation, not a calibrated curve",),
@@ -213,12 +213,12 @@ class SimulatedFleetProvider(HardwareProvider):
             if not isinstance(row, dict):
                 raise ValueError("each simulated device must be an object")
             key = str(row.get("catalog_key", ""))
-            if key not in catalog.CATALOG:
+            if key not in catalogue.CATALOGUE:
                 raise ValueError(f"unknown hardware catalogue key {key!r}")
             count = int(row.get("count", 1))
             if count <= 0:
                 raise ValueError("simulated device count must be positive")
-            base = catalog.CATALOG[key]
+            base = catalogue.CATALOGUE[key]
             devices.append(DetectedDevice(
                 name=base.name,
                 count=count,
@@ -542,8 +542,8 @@ class RedfishFleetProvider(HardwareProvider):
                 memory_gb=None,
                 memory_provenance="UNAVAILABLE",
                 performance_provenance=(
-                    catalog.CATALOG[key].provenance.value
-                    if key in catalog.CATALOG else "UNAVAILABLE"),
+                    catalogue.CATALOGUE[key].provenance.value
+                    if key in catalogue.CATALOGUE else "UNAVAILABLE"),
                 source=f"redfish:{endpoint.label}",
                 device_digest=self._digest(
                     "redfish-processor",
@@ -587,7 +587,7 @@ def _normal(value: str) -> str:
 
 def _apple_catalog_key(chip: str) -> str | None:
     normal = _normal(chip)
-    matches = [key for key in catalog.CATALOG if key.startswith("m")
+    matches = [key for key in catalogue.CATALOGUE if key.startswith("m")
                and _normal(key) == normal]
     return matches[0] if matches else None
 
@@ -596,7 +596,7 @@ def _nvidia_catalog_key(name: str) -> str | None:
     normal = _normal(name)
     candidates = [
         (key, _normal(device.name))
-        for key, device in catalog.CATALOG.items()
+        for key, device in catalogue.CATALOGUE.items()
         if device.vendor == "NVIDIA"
     ]
     exact = next((key for key, device_name in candidates if device_name == normal), None)

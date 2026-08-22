@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from core.estimator import WorkloadSpec, estimate_device
-from hardware import catalog
+from hardware import catalogue
 from hardware.calibration import (CalibrationObservation, build_profile,
                                   load_profiles, profiles_from_payload,
                                   serialise_profiles)
@@ -43,7 +43,7 @@ def test_exact_calibration_promotes_only_runtime_and_power_evidence():
         "llama31-8b", "training", "bf16", 2_000_000, 8,
         calibration_stack="torch-2.8_cuda-13_kernel-a1",
     )
-    estimate = estimate_device(spec, catalog.CATALOG["h100-sxm"], profile)
+    estimate = estimate_device(spec, catalogue.CATALOGUE["h100-sxm"], profile)
     assert estimate.provenance == "MEASURED"
     assert estimate.runtime_hours == pytest.approx(210 / 3600)
     assert estimate.it_power_kw == pytest.approx(4.1)
@@ -56,7 +56,7 @@ def test_calibration_does_not_leak_across_software_stacks():
         "llama31-8b", "training", "bf16", 2_000_000, 8,
         calibration_stack="different-stack",
     )
-    estimate = estimate_device(spec, catalog.CATALOG["h100-sxm"], profile)
+    estimate = estimate_device(spec, catalogue.CATALOGUE["h100-sxm"], profile)
     assert estimate.provenance == "ESTIMATED"
 
 

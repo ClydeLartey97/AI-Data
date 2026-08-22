@@ -32,7 +32,7 @@ from adapters.weather import PRESETS, WeatherAdapter
 from core import models as model_catalog
 from core.grid import PERIOD_HOURS
 from core.renewables import solar_capacity_factor, wind_capacity_factor
-from hardware import catalog
+from hardware import catalogue
 from app.panels import EXPAND_JS, PANEL_CSS
 from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS
 
@@ -49,12 +49,12 @@ def device_specs() -> dict:
         "tdp": d.tdp_watts, "idle": d.idle_watts,
         "link": d.interconnect.value, "prov": d.provenance.value,
         "source": d.source,
-    } for k, d in catalog.CATALOG.items()}
+    } for k, d in catalogue.CATALOGUE.items()}
 
 
 def model_specs() -> dict:
     out = {}
-    for k, m in model_catalog.CATALOG.items():
+    for k, m in model_catalog.CATALOGUE.items():
         arch = model_catalog.architecture_for(k, m.params_b)
         out[k] = {
             "name": m.name, "family": m.family, "params": m.params_b,
@@ -874,7 +874,7 @@ def main() -> None:
     sites = build_sites()
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(render(device_specs(), model_specs(), grid, sites), encoding="utf-8")
-    print(f"{len(model_catalog.CATALOG)} models × {len(catalog.CATALOG)} devices "
+    print(f"{len(model_catalog.CATALOGUE)} models × {len(catalogue.CATALOGUE)} devices "
           f"× {len(COUNTS)} fleet sizes × 6 precisions, computed live → {OUT}")
     if args.open:
         webbrowser.open(OUT.as_uri())

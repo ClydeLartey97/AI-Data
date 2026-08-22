@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hardware import baseline_store, catalog, mlperf
+from hardware import baseline_store, catalogue, mlperf
 from hardware.base import Provenance
 from hardware.providers import LocalDetector
 from hardware.telemetry import TelemetryCollector
@@ -75,7 +75,7 @@ def match_catalogue(name: str) -> tuple[str, object] | None:
     if not wanted:
         return None
     best, best_score = None, 0.0
-    for key, device in catalog.CATALOG.items():
+    for key, device in catalogue.CATALOGUE.items():
         have = _tokens(device.name) | _tokens(key)
         overlap = wanted & have
         if not overlap or not any(

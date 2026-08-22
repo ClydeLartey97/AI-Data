@@ -15,7 +15,7 @@ from adapters.base_adapter import GridDataPoint
 from core import models
 from core.planner import (PlanResult, PlanningCandidate, PlanningRequest,
                           optimise)
-from hardware import catalog
+from hardware import catalogue
 from hardware.base import Device, INTERCONNECT_GBS, Interconnect, Provenance
 from hardware.calibration import CalibrationProfile
 
@@ -41,7 +41,7 @@ class WorkloadSpec:
     calibration_stack: str = ""
 
     def __post_init__(self) -> None:
-        if self.model_key not in models.CATALOG:
+        if self.model_key not in models.CATALOGUE:
             raise ValueError(f"unknown model {self.model_key!r}")
         if self.task not in ("training", "inference"):
             raise ValueError("task must be training or inference")
@@ -89,7 +89,7 @@ class WorkloadSpec:
 
     @property
     def model(self) -> models.Model:
-        return models.CATALOG[self.model_key]
+        return models.CATALOGUE[self.model_key]
 
 
 @dataclass(frozen=True)
@@ -231,10 +231,10 @@ def planning_candidates(spec: WorkloadSpec, locations: list[GridLocation],
                         device_keys: list[str] | None = None,
                         calibrations: list[CalibrationProfile] | None = None,
                         ) -> list[PlanningCandidate]:
-    keys = device_keys or list(catalog.CATALOG)
+    keys = device_keys or list(catalogue.CATALOGUE)
     candidates: list[PlanningCandidate] = []
     for key in keys:
-        if key not in catalog.CATALOG:
+        if key not in catalogue.CATALOGUE:
             raise ValueError(f"unknown hardware {key!r}")
         matching = sorted(
             (profile for profile in (calibrations or []) if profile.matches(
@@ -249,7 +249,7 @@ def planning_candidates(spec: WorkloadSpec, locations: list[GridLocation],
             reverse=True,
         )
         estimate = estimate_device(
-            spec, catalog.CATALOG[key], matching[0] if matching else None
+            spec, catalogue.CATALOGUE[key], matching[0] if matching else None
         )
         for location in locations:
             candidates.append(PlanningCandidate(

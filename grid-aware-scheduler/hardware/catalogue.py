@@ -204,7 +204,7 @@ _DEVICES = [
        "AMX gives usable BF16 throughput, still far below any GPU."),
 ]
 
-CATALOG: dict[str, Device] = {d.key: d for d in _DEVICES}
+CATALOGUE: dict[str, Device] = {d.key: d for d in _DEVICES}
 
 MEMORY_TYPES = ["HBM3e", "HBM3", "HBM2e", "HBM2", "HBM", "GDDR7", "GDDR6X",
                 "GDDR6", "LPDDR5X", "LPDDR5", "LPDDR4X", "DDR5"]
@@ -213,18 +213,18 @@ TIERS = ["Datacentre", "Professional", "Workstation", "Consumer", "Server"]
 
 
 def get(key: str) -> Device:
-    if key not in CATALOG:
-        raise KeyError(f"unknown device {key!r}. Known: {', '.join(sorted(CATALOG))}")
-    return CATALOG[key]
+    if key not in CATALOGUE:
+        raise KeyError(f"unknown device {key!r}. Known: {', '.join(sorted(CATALOGUE))}")
+    return CATALOGUE[key]
 
 
 def by_vendor(vendor: str) -> list[Device]:
-    return [d for d in CATALOG.values() if d.vendor.lower() == vendor.lower()]
+    return [d for d in CATALOGUE.values() if d.vendor.lower() == vendor.lower()]
 
 
 def vendors() -> list[str]:
     seen, out = set(), []
-    for d in CATALOG.values():
+    for d in CATALOGUE.values():
         if d.vendor not in seen:
             seen.add(d.vendor)
             out.append(d.vendor)
