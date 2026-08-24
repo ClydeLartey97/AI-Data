@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 
 
 @dataclass(frozen=True)
@@ -227,6 +227,108 @@ def compare(local: list[tuple[datetime, float]],
     )
 
 
+@dataclass(frozen=True)
+class PlantValidation:
+    """A GB plant's day, decomposed into model error and curtailment.
+
+    Comparing a weather model straight against a wind farm's meter conflates
+    two completely different things, and the conflation is large enough to
+    make the model look far worse than it is. Measured at Hornsea 1A on
+    2026-08-14, the raw gap was 3.46x — of which 1.51x was the model running
+    optimistic and 2.26x was the farm being curtailed. The meter records what
+    the grid **allowed**, not what the wind could have driven.
+
+    The decomposition works because a GB unit publishes both halves. Its
+    Physical Notification is the operator's own forecast of output, made with
+    a professional wind model and submitted before the balancing mechanism
+    acts on it. So model against PN measures the model, and PN against the
+    meter measures curtailment.
+    """
+
+    plant_id: str
+    day: date
+    #: Our model against the operator's own forecast. The real model score.
+    model_vs_forecast: GenerationComparison
+    #: The operator's forecast against metered output. Curtailment.
+    forecast_vs_metered: GenerationComparison
+    planned_mwh: float
+    curtailed_mwh: float
+
+    @property
+    def curtailed_share(self) -> float | None:
+        if self.planned_mwh <= 0:
+            return None
+        return self.curtailed_mwh / self.planned_mwh
+
+    def summary(self) -> str:
+        lines = [f"{self.plant_id} on {self.day}", "",
+                 "Our model against the operator's own forecast "
+                 "(this is the model score):",
+                 self.model_vs_forecast.summary(), "",
+                 "The operator's forecast against the meter (this is "
+                 "curtailment, not model error):",
+                 self.forecast_vs_metered.summary(), ""]
+        share = self.curtailed_share
+        if share is not None:
+            lines.append(
+                f"The plant planned {self.planned_mwh:.0f} MWh and was "
+                f"curtailed {self.curtailed_mwh:.0f} MWh — {share:.0%} of its "
+                f"own plan, in one day.")
+        return "\n".join(lines)
+
+
+def validate_plant(plant_id: str, latitude: float, longitude: float, day: date,
+                   *, source: str = "wind") -> PlantValidation:
+    """Score the model against a named GB plant, separating out curtailment.
+
+    Intervals where the unit declared itself unavailable are excluded rather
+    than counted as zero output: a stopped turbine is not a failed wind
+    forecast, and including it would penalise the model for an outage.
+    """
+    from adapters import gb_plant
+    from adapters.open_meteo import fetch_archive
+    from core.renewables import solar_capacity_factor, wind_capacity_factor
+
+    rows = gb_plant.fetch_plant(plant_id, day, day)
+    metered = gb_plant.fetch_actual_output(plant_id, day)
+    frame = fetch_archive(latitude, longitude, day, day)
+    weather = {row.start_time.to_pydatetime(): row
+               for row in frame.itertuples(index=False)}
+
+    predicted, forecast, measured = [], [], []
+    planned_mwh = curtailed_mwh = 0.0
+    for row in rows:
+        if not row.available_kw or row.intended_kw is None:
+            continue  # unit unavailable: nothing for a weather model to answer
+        point = weather.get(row.timestamp.replace(minute=0))
+        actual = metered.get(row.timestamp)
+        if point is None or actual is None:
+            continue
+        if source == "solar":
+            factor = solar_capacity_factor(point.solar_radiation_wm2,
+                                           point.temperature_c)
+        else:
+            factor = wind_capacity_factor(point.wind_speed_100m_ms)
+        predicted.append((row.timestamp, factor))
+        forecast.append((row.timestamp,
+                         _clamp(row.intended_kw / row.available_kw)))
+        measured.append((row.timestamp, _clamp(actual / row.available_kw)))
+        planned_mwh += row.intended_kw * 0.5 / 1000
+        curtailed_mwh += max(0.0, row.intended_kw - actual) * 0.5 / 1000
+
+    return PlantValidation(
+        plant_id=plant_id, day=day,
+        model_vs_forecast=compare(predicted, forecast),
+        forecast_vs_metered=compare(forecast, measured),
+        planned_mwh=planned_mwh, curtailed_mwh=curtailed_mwh)
+
+
+def _clamp(value: float) -> float:
+    """Capacity factors live in 0-1. A wind farm drawing station load at night
+    meters as slightly negative, which is real but is not negative output."""
+    return max(0.0, min(1.0, value))
+
+
 def validate_site(latitude: float, longitude: float, start, end, *,
                   source: str = "solar", tilt: float = 35,
                   azimuth: float = 180) -> GenerationComparison:
@@ -263,18 +365,27 @@ def validate_site(latitude: float, longitude: float, start, end, *,
 
 def main() -> None:
     import argparse
-    from datetime import date
 
     parser = argparse.ArgumentParser(
         description="Score the local generation model against Renewables.ninja.")
     parser.add_argument("--lat", type=float, required=True)
     parser.add_argument("--lon", type=float, required=True)
     parser.add_argument("--start", type=date.fromisoformat, required=True)
-    parser.add_argument("--end", type=date.fromisoformat, required=True)
+    parser.add_argument("--end", type=date.fromisoformat)
     parser.add_argument("--source", choices=("solar", "wind"), default="solar")
+    parser.add_argument(
+        "--plant", metavar="BM_UNIT",
+        help="Validate against a named GB unit's own forecast and meter "
+             "instead of a reference simulation, separating model error from "
+             "curtailment. Needs no token. Uses --start as the day.")
     parser.add_argument("--tilt", type=float, default=35)
     parser.add_argument("--azimuth", type=float, default=180)
     args = parser.parse_args()
+
+    if args.plant:
+        print(validate_plant(args.plant, args.lat, args.lon, args.start,
+                             source=args.source).summary())
+        return
 
     result = validate_site(args.lat, args.lon, args.start, args.end,
                            source=args.source, tilt=args.tilt,

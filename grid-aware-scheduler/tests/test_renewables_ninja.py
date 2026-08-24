@@ -161,3 +161,42 @@ def test_durations_longer_than_the_series_are_skipped_not_truncated():
     result = compare(_series([0.4, 0.5]), _series([0.4, 0.5]),
                      durations_hours=(1, 2, 24))
     assert [w.duration_hours for w in result.windows] == [1, 2]
+
+
+# --- separating model error from curtailment ------------------------------
+
+def test_negative_metered_output_is_clamped_not_treated_as_negative_supply():
+    """A wind farm drawing station load at night meters slightly negative."""
+    from core.generation_check import _clamp
+    assert _clamp(-0.006) == 0.0
+    assert _clamp(1.4) == 1.0
+    assert _clamp(0.5) == 0.5
+
+
+def test_plant_validation_reports_curtailment_as_a_share_of_the_plan():
+    from core.generation_check import PlantValidation, compare
+    empty = compare([], [])
+    result = PlantValidation("T_HOWAO-1", date(2026, 8, 14), empty, empty,
+                             planned_mwh=1437.0, curtailed_mwh=823.0)
+    assert result.curtailed_share == pytest.approx(823 / 1437)
+    assert "57%" in result.summary()
+
+
+def test_a_plant_that_planned_nothing_has_no_curtailment_share():
+    """Dividing by a zero plan would present as 'never curtailed'."""
+    from core.generation_check import PlantValidation, compare
+    empty = compare([], [])
+    result = PlantValidation("T_X", date(2026, 8, 14), empty, empty,
+                             planned_mwh=0.0, curtailed_mwh=0.0)
+    assert result.curtailed_share is None
+    assert "curtailed" not in result.summary()
+
+
+def test_the_summary_labels_which_half_is_the_model_score():
+    """The whole point of the split: only one of the two scores is our fault."""
+    from core.generation_check import PlantValidation, compare
+    empty = compare([], [])
+    text = PlantValidation("T_X", date(2026, 8, 14), empty, empty,
+                           planned_mwh=10.0, curtailed_mwh=1.0).summary()
+    assert "this is the model score" in text
+    assert "curtailment, not model error" in text

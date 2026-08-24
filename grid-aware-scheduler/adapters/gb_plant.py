@@ -120,6 +120,68 @@ def fetch_plant(bm_unit: str, start: date, end: date, *,
     ]
 
 
+#: B1610 settles with a lag. Nothing inside this many days is published.
+SETTLEMENT_LAG_DAYS = 7
+
+#: Settlement periods in an ordinary day. Clock-change days have 46 or 50, and
+#: the fetch simply returns nothing for periods that do not exist.
+_PERIODS = 50
+
+
+def fetch_actual_output(bm_unit: str, day: date) -> dict[datetime, float]:
+    """Metered output in kW per half hour, from B1610.
+
+    This is what the unit *actually generated*, settled and ex-post — the only
+    ground truth in this project that is neither a model nor a declaration.
+    It is what makes validating the generation model possible without paying
+    for a second simulation to compare against.
+
+    Elexon serves B1610 one settlement period at a time, so a day costs one
+    request per period. Periods that are not published come back empty and are
+    simply absent from the result.
+    """
+    fetch_per_unit, = national_grid_tool.load(
+        "sources.elexon.generation", "fetch_actual_generation_per_unit")
+
+    out: dict[datetime, float] = {}
+    for period in range(1, _PERIODS + 1):
+        try:
+            frame = fetch_per_unit(day, period, bm_unit=bm_unit)
+        except Exception:  # noqa: BLE001 - one bad period must not lose a day
+            continue
+        if frame is None or len(frame) == 0:
+            continue
+        row = frame.iloc[0]
+        quantity = row.get("quantity")
+        stamp = row.get("half_hour_end_time")
+        if quantity is None or quantity != quantity or stamp is None:
+            continue
+        moment = _parse_end_time(stamp)
+        if moment is None:
+            continue
+        # B1610 stamps the half hour's *end*; every other series in this
+        # project is keyed by its start, and joining the two without this
+        # shift would compare each interval against the previous one.
+        out[moment - timedelta(minutes=30)] = float(quantity) * _MW_TO_KW
+    return out
+
+
+def _parse_end_time(stamp) -> datetime | None:
+    """B1610's half-hour end, as a UTC-aware datetime."""
+    if hasattr(stamp, "to_pydatetime"):
+        moment = stamp.to_pydatetime()
+    elif isinstance(stamp, datetime):
+        moment = stamp
+    else:
+        try:
+            moment = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
 def availability_by_timestamp(bm_unit: str, timestamps: list[datetime]
                               ) -> dict[datetime, float]:
     """Declared available power in kW, keyed to the requested half hours.
