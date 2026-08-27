@@ -172,6 +172,33 @@ M2_FAMILY: dict[str, ChipSpec] = {
 }
 
 
+#: The M1 generation. Apple's published core counts and bus widths.
+#:
+#: Present so that a measurement taken on an M1 part has a family to scale
+#: through, and — more usefully — so that projecting *from* the M2 anchor onto
+#: an M1 part can be checked against a real measurement of it. See
+#: `validate_projection`.
+#:
+#: **Core counts here are the top configuration of each part.** The M1 Ultra
+#: ships with 48 or 64 GPU cores and the M1 Max with 24 or 32, so a machine in
+#: hand must have its actual count read rather than assumed; passing the wrong
+#: one corrupts the per-core divisor exactly as taking the M2's 10-core peak
+#: for an 8-core part did.
+M1_FAMILY: dict[str, ChipSpec] = {
+    "m1": ChipSpec("m1", "M1", 8, 4, 4, 68.0, 16.0, actively_cooled=False),
+    "m1-pro": ChipSpec("m1-pro", "M1", 16, 8, 2, 200.0, 32.0),
+    "m1-max": ChipSpec("m1-max", "M1", 32, 8, 2, 400.0, 64.0),
+    "m1-ultra": ChipSpec("m1-ultra", "M1", 64, 16, 4, 800.0, 128.0, dies=2),
+}
+
+#: Published dense fp16 peaks, in GFLOP/s, for parts a projection can target.
+#: Taken from the device catalogue, where the M1 rows are per-core consistent
+#: at about 0.325 TFLOPS per GPU core across all four members.
+PUBLISHED_PEAK_GFLOPS = {
+    "m1": 2600.0, "m1-pro": 5200.0, "m1-max": 10400.0, "m1-ultra": 21000.0,
+}
+
+
 @dataclass(frozen=True)
 class Measurement:
     """What was actually measured on the anchor part."""
@@ -435,6 +462,136 @@ def project(anchor: Measurement, target: PublishedPart) -> DerivedDevice:
         provenance=PROJECTED,
         anchor_key=anchor.chip_key,
         notes=tuple(notes),
+    )
+
+
+@dataclass(frozen=True)
+class ProjectionScore:
+    """How well a cross-generation projection predicted a real measurement.
+
+    The whole Apple-silicon scale-up argument rests on `project` being roughly
+    right: that a fraction of peak measured on one generation carries onto
+    another. That is an assumption until something tests it, and this is what
+    tests it.
+    """
+
+    target_key: str
+    predicted_gflops: float
+    measured_gflops: float
+    predicted_bandwidth_gbs: float
+    measured_bandwidth_gbs: float
+    #: measured / predicted. Above 1 means the projection was conservative.
+    compute_ratio: float
+    bandwidth_ratio: float
+    holds: bool
+    tolerance: float
+    notes: tuple[str, ...] = ()
+
+    def public_dict(self) -> dict:
+        return {
+            "target": self.target_key,
+            "predicted_gflops": round(self.predicted_gflops, 1),
+            "measured_gflops": round(self.measured_gflops, 1),
+            "compute_ratio": round(self.compute_ratio, 3),
+            "predicted_bandwidth_gbs": round(self.predicted_bandwidth_gbs, 1),
+            "measured_bandwidth_gbs": round(self.measured_bandwidth_gbs, 1),
+            "bandwidth_ratio": round(self.bandwidth_ratio, 3),
+            "holds": self.holds,
+            "tolerance": self.tolerance,
+            "notes": list(self.notes),
+        }
+
+
+def validate_projection(anchor: Measurement, target: PublishedPart,
+                        measured: Measurement, *,
+                        tolerance: float = 0.20) -> ProjectionScore:
+    """Score a cross-generation projection against a real measurement of the target.
+
+    **Why this is the highest-value thing a second Apple machine can do.**
+    Extra memory lets bigger models run, which is useful. But the claim this
+    project actually needs to defend is that a chip nobody here can touch —
+    server silicon in a datacentre — can be characterised from a chip that can
+    be touched. `project` is the method that does it, and until now nothing had
+    checked whether the method works.
+
+    With two Apple parts of different generations in hand, it can be checked
+    directly: project from the measured anchor onto the *other* part using only
+    its published figures, then measure that part and compare. Direction does
+    not matter — projecting from a newer generation onto an older one tests the
+    same assumption, that achieved fraction of peak transfers across a core
+    redesign.
+
+    If it holds, the same method applied to newer silicon is credible and can
+    be said so. If it does not, that is worth far more than a flattering
+    number: it means the projection tier must be widened or withdrawn before
+    anyone leans on it.
+
+    ``tolerance`` is deliberately loose. This is a magnitude check on a method,
+    not a calibration, and claiming tighter agreement than the inputs support
+    would be the same error as reporting a two-die derate for a four-die part.
+    """
+    if not 0 < tolerance < 1:
+        raise ValueError("tolerance must be a fraction between 0 and 1")
+
+    predicted = project(anchor, target)
+    if measured.gemm_fp16_gflops <= 0 or measured.memory_bandwidth_gbs <= 0:
+        raise DerivationRefused(
+            "a projection cannot be scored against a measurement of zero")
+
+    compute_ratio = measured.gemm_fp16_gflops / predicted.gemm_fp16_gflops
+    bandwidth_ratio = (measured.memory_bandwidth_gbs
+                       / predicted.memory_bandwidth_gbs)
+    within = (abs(compute_ratio - 1) <= tolerance
+              and abs(bandwidth_ratio - 1) <= tolerance)
+
+    notes = [
+        f"projected from {anchor.chip_key} using published {target.key} "
+        f"figures only; no {target.key} measurement fed the prediction.",
+        f"compute came in {compute_ratio:.2f}x the projection, bandwidth "
+        f"{bandwidth_ratio:.2f}x, against a {tolerance:.0%} tolerance.",
+    ]
+    if within:
+        notes.append(
+            "the method held on this pair, so applying it to silicon nobody "
+            "here has measured is defensible as a magnitude estimate.")
+    else:
+        notes.append(
+            "the method did NOT hold on this pair. Widen the PROJECTED tier's "
+            "stated uncertainty or withdraw it before any claim rests on it — "
+            "a projection onto unmeasurable silicon cannot be more trusted "
+            "than one onto silicon that could be checked.")
+    if target.dies > 1:
+        notes.append(
+            f"{target.key} is a {target.dies}-die part, so this also bounds "
+            f"the interconnect derate: any shortfall against the projection "
+            f"includes the crossing cost, which is otherwise unmeasured.")
+    return ProjectionScore(
+        target_key=target.key,
+        predicted_gflops=predicted.gemm_fp16_gflops,
+        measured_gflops=measured.gemm_fp16_gflops,
+        predicted_bandwidth_gbs=predicted.memory_bandwidth_gbs,
+        measured_bandwidth_gbs=measured.memory_bandwidth_gbs,
+        compute_ratio=compute_ratio,
+        bandwidth_ratio=bandwidth_ratio,
+        holds=within,
+        tolerance=tolerance,
+        notes=tuple(notes),
+    )
+
+
+def published_part(key: str, family: str, spec: ChipSpec, *,
+                   source: str = "vendor published") -> PublishedPart:
+    """A `PublishedPart` assembled from a family table and the published peak."""
+    return PublishedPart(
+        key=key,
+        family=family,
+        spec_peak_gflops=PUBLISHED_PEAK_GFLOPS.get(key),
+        memory_bandwidth_gbs=spec.memory_bandwidth_gbs,
+        max_memory_gb=spec.max_memory_gb,
+        gpu_cores=spec.gpu_cores,
+        dies=spec.dies,
+        actively_cooled=spec.actively_cooled,
+        source=source,
     )
 
 

@@ -241,3 +241,120 @@ def test_the_source_of_a_published_figure_travels_into_the_result():
         derive_module.MEASURED_M2,
         _published_part(source="press announcement, not a datasheet"))
     assert any("press announcement" in note for note in result.notes)
+
+
+# --- Validating the projection method against a second real part ---
+
+def _m1_ultra_part():
+    return derive_module.published_part(
+        "m1-ultra", "M1", derive_module.M1_FAMILY["m1-ultra"],
+        source="Apple published specifications")
+
+
+def test_the_m1_family_is_per_core_consistent_like_the_m2_family():
+    """Published peaks divided by published cores should agree across members.
+
+    If they do not, one of the rows is the wrong configuration, which is the
+    error that produced the "72% of peak" figure earlier in this project.
+    """
+    rates = {
+        key: derive_module.PUBLISHED_PEAK_GFLOPS[key] / spec.gpu_cores
+        for key, spec in derive_module.M1_FAMILY.items()
+    }
+    assert max(rates.values()) - min(rates.values()) < 10.0
+
+
+def test_the_ultra_is_recorded_as_a_two_die_part():
+    assert derive_module.M1_FAMILY["m1-ultra"].dies == 2
+    assert derive_module.M1_FAMILY["m1-max"].dies == 1
+
+
+def test_a_projection_onto_the_m1_ultra_is_a_concrete_falsifiable_number():
+    predicted = derive_module.project(derive_module.MEASURED_M2, _m1_ultra_part())
+    assert predicted.provenance == derive_module.PROJECTED
+    assert predicted.gemm_fp16_gflops > 0
+    assert predicted.memory_bandwidth_gbs > 0
+
+
+def _measured(gflops: float, bandwidth: float) -> "derive_module.Measurement":
+    return derive_module.Measurement(
+        chip_key="m1-ultra", gpu_cores=64, gemm_fp16_gflops=gflops,
+        memory_bandwidth_gbs=bandwidth, spec_bandwidth_gbs=800.0,
+        spec_peak_gflops=21000.0)
+
+
+def test_a_projection_that_lands_close_is_reported_as_holding():
+    part = _m1_ultra_part()
+    predicted = derive_module.project(derive_module.MEASURED_M2, part)
+    close = _measured(predicted.gemm_fp16_gflops * 1.05,
+                      predicted.memory_bandwidth_gbs * 0.95)
+    score = derive_module.validate_projection(
+        derive_module.MEASURED_M2, part, close)
+    assert score.holds is True
+    assert score.compute_ratio == pytest.approx(1.05, abs=0.01)
+
+
+def test_a_projection_that_misses_badly_is_reported_as_failing():
+    """A failure is the useful result. It must not be softened."""
+    part = _m1_ultra_part()
+    predicted = derive_module.project(derive_module.MEASURED_M2, part)
+    far = _measured(predicted.gemm_fp16_gflops * 0.5,
+                    predicted.memory_bandwidth_gbs * 0.5)
+    score = derive_module.validate_projection(
+        derive_module.MEASURED_M2, part, far)
+    assert score.holds is False
+    assert any("did NOT hold" in note for note in score.notes)
+
+
+def test_a_failing_projection_says_to_widen_or_withdraw_the_tier():
+    part = _m1_ultra_part()
+    predicted = derive_module.project(derive_module.MEASURED_M2, part)
+    far = _measured(predicted.gemm_fp16_gflops * 0.4,
+                    predicted.memory_bandwidth_gbs * 0.4)
+    score = derive_module.validate_projection(
+        derive_module.MEASURED_M2, part, far)
+    joined = " ".join(score.notes)
+    assert "withdraw" in joined
+
+
+def test_scoring_a_two_die_target_notes_it_also_bounds_the_derate():
+    part = _m1_ultra_part()
+    predicted = derive_module.project(derive_module.MEASURED_M2, part)
+    score = derive_module.validate_projection(
+        derive_module.MEASURED_M2, part,
+        _measured(predicted.gemm_fp16_gflops, predicted.memory_bandwidth_gbs))
+    assert any("interconnect derate" in note for note in score.notes)
+
+
+def test_no_measurement_of_the_target_ever_feeds_its_own_prediction():
+    """The prediction must use published figures only, or it proves nothing."""
+    part = _m1_ultra_part()
+    low = derive_module.validate_projection(
+        derive_module.MEASURED_M2, part, _measured(1000.0, 100.0))
+    high = derive_module.validate_projection(
+        derive_module.MEASURED_M2, part, _measured(30000.0, 900.0))
+    assert low.predicted_gflops == high.predicted_gflops
+
+
+def test_a_measurement_of_zero_cannot_be_scored():
+    with pytest.raises(derive_module.DerivationRefused):
+        derive_module.validate_projection(
+            derive_module.MEASURED_M2, _m1_ultra_part(), _measured(0.0, 0.0))
+
+
+def test_tolerance_must_be_a_fraction():
+    with pytest.raises(ValueError):
+        derive_module.validate_projection(
+            derive_module.MEASURED_M2, _m1_ultra_part(),
+            _measured(1.0, 1.0), tolerance=1.5)
+
+
+def test_a_score_serialises_for_the_record():
+    part = _m1_ultra_part()
+    predicted = derive_module.project(derive_module.MEASURED_M2, part)
+    payload = derive_module.validate_projection(
+        derive_module.MEASURED_M2, part,
+        _measured(predicted.gemm_fp16_gflops,
+                  predicted.memory_bandwidth_gbs)).public_dict()
+    assert payload["target"] == "m1-ultra"
+    assert payload["holds"] is True
