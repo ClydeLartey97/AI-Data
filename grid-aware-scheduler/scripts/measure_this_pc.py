@@ -120,9 +120,47 @@ def describe_host() -> dict:
     return {
         "cards": cards,
         "card_count": len(cards),
+        "cpu": describe_cpu(),
         "platform": platform.platform(),
         "python": platform.python_version(),
         "machine": platform.machine(),
+    }
+
+
+def describe_cpu() -> dict:
+    """Host CPU identity and core count.
+
+    Recorded rather than measured, and it is not idle detail. The board power
+    figure this script reports covers the **card only**. A facility pays for
+    the whole node, and on a large training host the CPU can draw a few
+    hundred watts that `nvidia-smi` never sees — so joules per token derived
+    from board power alone is an understatement, and knowing what host it sat
+    in is what lets a reader judge by how much.
+
+    It also bounds the measurement's validity. A GPU benchmark on a machine
+    whose CPU is saturated is measuring contention, which is why
+    `hardware/preflight.py` refuses a run above 25% busy.
+
+    Deliberately identity only. CPU package power needs elevated access on
+    Windows, and this script's whole premise is that it runs without any.
+    """
+    name = platform.processor() or ""
+    if platform.system() == "Windows":
+        name = os.environ.get("PROCESSOR_IDENTIFIER", name)
+    elif platform.system() == "Linux":
+        try:
+            for line in Path("/proc/cpuinfo").read_text().splitlines():
+                if line.lower().startswith("model name"):
+                    name = line.split(":", 1)[1].strip()
+                    break
+        except OSError:
+            pass
+    return {
+        "name": name.strip() or "unknown",
+        "logical_cores": os.cpu_count(),
+        "architecture": platform.machine(),
+        "power_scope_note": "CPU draw is NOT included in the board power "
+                            "figure reported below, and is not measured here.",
     }
 
 
@@ -384,6 +422,8 @@ def report(host: dict, units: dict, summary: dict, power: dict) -> str:
         f"  Memory          {units.get('total_memory_gb', 0):.1f} GB",
         f"  Compute cap.    {units.get('compute_capability', '?')}",
         f"  Driver          {host['cards'][0].get('driver', '?') if host.get('cards') else '?'}",
+        f"  Host CPU        {host.get('cpu', {}).get('name', '?')[:44]}",
+        f"  CPU cores       {host.get('cpu', {}).get('logical_cores', '?')} logical",
         f"  OS              {host.get('platform', '?')}",
         "-" * 68,
     ]
@@ -403,7 +443,9 @@ def report(host: dict, units: dict, summary: dict, power: dict) -> str:
             f"  Board power     {power['median_watts']:>11,.1f} W median, "
             f"{power['peak_watts']:,.1f} W peak",
             f"  Efficiency      {summary.get('gflops_per_watt', 0):>11,.1f} GFLOP/s per watt",
-            "  Scope           board only — excludes CPU, RAM, fans, PSU.",
+            "  Scope           board only — excludes the host CPU, RAM, fans",
+            "                  and PSU losses. The facility pays for all of",
+            "                  those, so treat this as a floor on node draw,",
             "                  NOT comparable to a wall-meter reading.",
         ]
     else:
