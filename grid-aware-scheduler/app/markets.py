@@ -6,6 +6,7 @@ owns the important market-specific truth around those points:
 * GB price is national while carbon can be selected by grid region.
 * CAISO price is selected at a pricing node while carbon is balancing-area.
 * NYISO price is selected at one of eleven zones while carbon is balancing-area.
+* ERCOT price is selected at a hub or load zone while carbon is balancing-area.
 
 Live feeds do not currently provide a complete 48-hour forward price curve in
 both markets. The planner therefore uses a recent 48-hour replay and labels it
@@ -20,6 +21,7 @@ from typing import Any
 
 from adapters.base_adapter import GridDataPoint
 from adapters.caiso import CAISOAdapter, LOCATIONS as CAISO_LOCATIONS
+from adapters.ercot import ERCOTAdapter, LOCATIONS as ERCOT_LOCATIONS
 from adapters.gb import GBAdapter
 from adapters.gb_regional import GBRegionalAdapter, REGIONS
 from adapters.miso import MISOAdapter, LOCATIONS as MISO_LOCATIONS
@@ -66,6 +68,11 @@ def market_locations(market: str) -> list[LocationChoice]:
         return [
             LocationChoice(key, loc.name, f"MISO hub · {loc.area}")
             for key, loc in MISO_LOCATIONS.items()
+        ]
+    if market.upper() == "ERCOT":
+        return [
+            LocationChoice(key, loc.name, f"ERCOT {loc.kind} · {loc.area}")
+            for key, loc in ERCOT_LOCATIONS.items()
         ]
     return [LocationChoice("national", "GB national", "National carbon and price")] + [
         LocationChoice(key, name, "Regional carbon · national price")
@@ -195,6 +202,36 @@ def load_market(market: str = "GB", location: str = "national", *,
                         f"{carbon_description}."),
             signal_mode="Historical replay · latest complete official interval",
             locations=market_locations("MISO"),
+        )
+
+    if key == "ERCOT":
+        location_key = location or "houston"
+        adapter = ERCOTAdapter(location_key)
+        end = current - timedelta(days=2)
+        start = end - timedelta(days=2 if planner else min(days, 7))
+        series = adapter.get_data(start, end)
+        loc = adapter.location
+        methods = {getattr(point, "carbon_method", "") for point in series}
+        uses_direct_rate = any("consumption CO2 rate" in method for method in methods)
+        carbon_description = (
+            "EIA-930 published consumption rate"
+            if uses_direct_rate
+            else "EIA-930 fuel-mix estimate; imports and unclassified other excluded"
+        )
+        return MarketContext(
+            market_key="ERCOT",
+            market_name="ERCOT",
+            location_key=location_key,
+            location_name=loc.name,
+            series=series,
+            currency="USD",
+            symbol="$",
+            price_label=f"Day-ahead settlement point price · {loc.settlement_point}",
+            carbon_label=f"ERCOT balancing-area carbon · {carbon_description}",
+            provenance=("Price: ERCOT MIS DAM Settlement Point Prices, keyless. "
+                        f"Carbon: {carbon_description}."),
+            signal_mode="Historical replay · latest complete official interval",
+            locations=market_locations("ERCOT"),
         )
 
     if key != "GB":
