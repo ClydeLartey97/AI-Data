@@ -1,6 +1,4 @@
-# Tiled Water
-
-### AI Data Centre Optimiser
+# AI Data Centre Optimiser
 
 **Decides which accelerator runs which AI workload, where, when, and on which
 physically available supply of electricity.**
