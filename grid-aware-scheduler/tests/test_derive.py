@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+import hardware.derive as derive_module
 from hardware.derive import (DERIVED, M2_FAMILY, MEASURED_M2,
                              ULTRAFUSION_EFFICIENCY, ChipSpec,
                              DerivationRefused, Measurement, best, derive,
@@ -141,3 +142,102 @@ def test_nothing_at_all_reports_unavailable():
 
 def test_an_unknown_provenance_label_loses_to_a_known_one():
     assert best(("INVENTED", 1.0), ("SPEC", 2.0)) == ("SPEC", 2.0)
+
+
+# --- Multi-die packages, and the quad-die part that broke the flat derate ---
+
+def test_a_single_die_pays_no_interconnect_cost():
+    assert derive_module.interconnect_hops(1) == 0
+    assert derive_module.multi_die_efficiency(1) == 1.0
+
+
+def test_two_dies_are_one_crossing_and_match_the_original_constant():
+    """The two-die case must not move: every existing Ultra depends on it."""
+    assert derive_module.interconnect_hops(2) == 1
+    assert derive_module.multi_die_efficiency(2) == pytest.approx(0.90)
+
+
+def test_a_quad_die_package_pays_two_crossings_not_one():
+    """The bug this fixes. A quad-die Ultra is two dual-die parts joined.
+
+    Applying the two-die derate to it overstates dense throughput by about
+    11%, silently, on exactly the part someone reaches for when modelling a
+    large Apple-silicon deployment.
+    """
+    assert derive_module.interconnect_hops(4) == 2
+    assert derive_module.multi_die_efficiency(4) == pytest.approx(0.81)
+    flat = derive_module.ULTRAFUSION_EFFICIENCY
+    overstatement = flat / derive_module.multi_die_efficiency(4)
+    assert overstatement == pytest.approx(1.111, abs=0.01)
+
+
+def test_die_count_must_be_physical():
+    with pytest.raises(ValueError):
+        derive_module.interconnect_hops(0)
+
+
+# --- Crossing a generation boundary ---
+
+def _published_part(**kwargs):
+    defaults = dict(key="future-ultra", family="M5", spec_peak_gflops=20000.0,
+                    memory_bandwidth_gbs=1600.0, max_memory_gb=512.0,
+                    gpu_cores=160)
+    defaults.update(kwargs)
+    return derive_module.PublishedPart(**defaults)
+
+
+def test_the_anchor_knows_what_fraction_of_peak_it_reached():
+    anchor = derive_module.MEASURED_M2
+    assert anchor.compute_efficiency == pytest.approx(0.897, abs=0.005)
+    assert anchor.bandwidth_efficiency == pytest.approx(0.757, abs=0.005)
+
+
+def test_projection_applies_achieved_fractions_not_the_per_core_rate():
+    """Across a generation only the efficiency travels, never the rate."""
+    anchor = derive_module.MEASURED_M2
+    result = derive_module.project(anchor, _published_part(dies=1))
+    assert result.provenance == derive_module.PROJECTED
+    assert result.gemm_fp16_gflops == pytest.approx(
+        20000.0 * anchor.compute_efficiency)
+    assert result.memory_bandwidth_gbs == pytest.approx(
+        1600.0 * anchor.bandwidth_efficiency)
+
+
+def test_a_projection_never_outranks_a_measurement_or_a_publication():
+    rank = derive_module.PROVENANCE_RANK
+    assert rank["MEASURED"] < rank["PUBLISHED"] < rank[DERIVED] \
+        < rank[derive_module.PROJECTED] < rank["SPEC"]
+
+
+def test_projection_onto_a_quad_die_part_pays_both_crossings():
+    anchor = derive_module.MEASURED_M2
+    single = derive_module.project(anchor, _published_part(dies=1))
+    quad = derive_module.project(anchor, _published_part(dies=4))
+    assert quad.gemm_fp16_gflops == pytest.approx(
+        single.gemm_fp16_gflops * 0.81)
+
+
+def test_projection_refuses_a_part_with_no_published_figures_at_all():
+    """A part nobody has described cannot be projected onto. Refuse, not guess."""
+    with pytest.raises(derive_module.DerivationRefused):
+        derive_module.project(
+            derive_module.MEASURED_M2,
+            _published_part(spec_peak_gflops=None, memory_bandwidth_gbs=None))
+
+
+def test_projection_refuses_an_anchor_with_no_published_peak():
+    """Without a peak there is no achieved fraction, so nothing travels."""
+    blind = derive_module.Measurement(
+        chip_key="m2", gpu_cores=8, gemm_fp16_gflops=2583.2,
+        memory_bandwidth_gbs=75.7, spec_bandwidth_gbs=100.0,
+        spec_peak_gflops=None)
+    with pytest.raises(derive_module.DerivationRefused):
+        derive_module.project(blind, _published_part())
+
+
+def test_the_source_of_a_published_figure_travels_into_the_result():
+    """A press report must never read like a datasheet downstream."""
+    result = derive_module.project(
+        derive_module.MEASURED_M2,
+        _published_part(source="press announcement, not a datasheet"))
+    assert any("press announcement" in note for note in result.notes)

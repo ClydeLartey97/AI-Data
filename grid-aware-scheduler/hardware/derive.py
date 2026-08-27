@@ -54,6 +54,16 @@ from dataclasses import dataclass
 #: to a vendor's marketing peak.
 DERIVED = "DERIVED"
 
+#: Weaker than DERIVED, and separated from it because the licence is different.
+#: DERIVED scales a measured *per-core rate* to a sibling built from the same
+#: core. PROJECTED crosses a generation boundary, where that licence does not
+#: exist: an M5 core is not an M2 core, so no per-core rate travels. What
+#: travels instead is the *achieved fraction* of theoretical peak — how much of
+#: the silicon a mature software stack actually extracts — which is a property
+#: of the toolchain rather than of the core. It is a real, useful thing to
+#: carry forward, and it is still weaker than measuring the part.
+PROJECTED = "PROJECTED"
+
 #: Priority order for any figure about a device. The rule the whole project
 #: turns on: **a real measurement always wins.** Anything derived is a fallback
 #: for parts nobody has measured or published, never an override.
@@ -61,9 +71,10 @@ PROVENANCE_RANK = {
     "MEASURED": 0,
     "PUBLISHED": 1,
     DERIVED: 2,
-    "CONTRACTED": 3,
-    "SPEC": 4,
-    "ESTIMATED": 5,
+    PROJECTED: 3,
+    "CONTRACTED": 4,
+    "SPEC": 5,
+    "ESTIMATED": 6,
     "UNAVAILABLE": 9,
 }
 
@@ -82,10 +93,48 @@ CATALOGUE_REFERENCE_CORES = {
     "m2": 10, "m2-pro": 19, "m2-max": 38, "m2-ultra": 76,
 }
 
-#: Interconnect derate for the two-die Ultra parts. Deliberately a single
-#: blunt figure with no false precision: the honest statement is "meaningfully
-#: less than linear, by an amount nobody here has measured".
+#: Interconnect derate **per crossing**. Deliberately a single blunt figure
+#: with no false precision: the honest statement is "meaningfully less than
+#: linear, by an amount nobody here has measured".
 ULTRAFUSION_EFFICIENCY = 0.90
+
+
+def interconnect_hops(dies: int) -> int:
+    """Worst-case UltraFusion crossings for a package of ``dies`` dies.
+
+    This exists because Apple went past two dies. Up to and including the M4
+    generation an "Ultra" was two dies joined by one UltraFusion bridge, and a
+    single flat derate described it. The M5 Ultra is announced as a **quad-die**
+    part — two dual-die Max chips joined together — so it has a hierarchy: one
+    crossing inside each Max, and a second between them.
+
+    Treating a four-die part as though it paid the two-die penalty is the bug
+    this function removes. It was not a latent style problem: a flat 0.90 on a
+    quad-die package overstates its dense throughput by about 11%, and does so
+    silently, on exactly the part someone would reach for to model a large
+    Apple-silicon deployment.
+
+    The hop count is ``log2(dies)`` because the packaging is hierarchical
+    rather than a daisy chain: doubling the dies adds one level, not one link.
+    """
+    if dies < 1:
+        raise ValueError("a package has at least one die")
+    hops = 0
+    remaining = dies
+    while remaining > 1:
+        remaining = (remaining + 1) // 2
+        hops += 1
+    return hops
+
+
+def multi_die_efficiency(dies: int) -> float:
+    """Compounded interconnect derate for a package of ``dies`` dies.
+
+    One unmeasured constant applied twice is a weaker claim than the same
+    constant applied once, and `derive` says so in its notes rather than
+    presenting a quad-die figure with the confidence of a two-die one.
+    """
+    return ULTRAFUSION_EFFICIENCY ** interconnect_hops(dies)
 
 
 @dataclass(frozen=True)
@@ -135,6 +184,10 @@ class Measurement:
     memory_bandwidth_gbs: float
     #: The part's published bus, so achieved-fraction can be computed.
     spec_bandwidth_gbs: float
+    #: The part's published dense fp16 peak, for the same reason. Needed to
+    #: state what fraction of the silicon the toolchain actually reaches,
+    #: which is the only quantity that survives a generation change.
+    spec_peak_gflops: float | None = None
     runs: int = 3
 
     @property
@@ -147,6 +200,19 @@ class Measurement:
         if self.spec_bandwidth_gbs <= 0:
             return 1.0
         return self.memory_bandwidth_gbs / self.spec_bandwidth_gbs
+
+    @property
+    def compute_efficiency(self) -> float | None:
+        """Fraction of the published dense peak the toolchain actually reaches.
+
+        Not the same thing as MFU. This is dense GEMM against the vendor's
+        arithmetic peak — the ceiling — while MFU measures a whole transformer
+        against that peak and is far lower. Conflating them is the error
+        `hardware/scan.py` already warns about.
+        """
+        if not self.spec_peak_gflops or self.spec_peak_gflops <= 0:
+            return None
+        return self.gemm_fp16_gflops / self.spec_peak_gflops
 
 
 @dataclass(frozen=True)
@@ -202,12 +268,21 @@ def derive(anchor: Measurement, target: ChipSpec,
     # Compute follows the cores, because they are the same cores.
     compute = anchor.gflops_per_gpu_core * target.gpu_cores
     if target.dies > 1:
-        compute *= ULTRAFUSION_EFFICIENCY
+        hops = interconnect_hops(target.dies)
+        efficiency = multi_die_efficiency(target.dies)
+        compute *= efficiency
         notes.append(
             f"{target.dies} dies over an interconnect, not one large die; "
-            f"scaled at {ULTRAFUSION_EFFICIENCY:.0%} of linear because work "
-            f"spanning both halves pays to cross. The real figure is "
-            f"unmeasured.")
+            f"{hops} worst-case crossing{'s' if hops > 1 else ''} at "
+            f"{ULTRAFUSION_EFFICIENCY:.0%} each gives {efficiency:.0%} of "
+            f"linear, because work spanning the package pays to cross. The "
+            f"per-crossing figure is unmeasured.")
+        if hops > 1:
+            notes.append(
+                f"a {target.dies}-die package applies that unmeasured constant "
+                f"{hops} times over, so this figure carries materially wider "
+                f"uncertainty than a two-die one. Treat it as a magnitude "
+                f"check, not a procurement number.")
 
     # Bandwidth follows the bus, not the cores. What carries across is the
     # achieved fraction of theoretical, which is a property of the design.
@@ -257,6 +332,118 @@ def derive_family(anchor: Measurement,
     }
 
 
+@dataclass(frozen=True)
+class PublishedPart:
+    """A part described only by the vendor's own published figures.
+
+    Used for silicon nobody here has run and nobody has submitted to a
+    benchmark — a new generation, or a server part that is not sold retail.
+    Every field is the vendor's claim, which is why what comes out the other
+    side of `project` is labelled PROJECTED rather than DERIVED.
+    """
+
+    key: str
+    family: str
+    #: Published dense fp16 peak. Leave ``None`` and the projection refuses
+    #: rather than inventing one.
+    spec_peak_gflops: float | None
+    memory_bandwidth_gbs: float | None
+    max_memory_gb: float | None
+    gpu_cores: int | None = None
+    dies: int = 1
+    actively_cooled: bool = True
+    #: Where these figures came from, in the operator's own words. Recorded so
+    #: a press announcement never reads like a datasheet.
+    source: str = "vendor published"
+
+
+def project(anchor: Measurement, target: PublishedPart) -> DerivedDevice:
+    """Carry the anchor's *achieved fractions* onto a part from another generation.
+
+    This is the bridge `derive` refuses to build, and the distinction matters.
+    `derive` scales a measured per-core rate to a sibling built from the same
+    core, which is legitimate because the core is literally the same design.
+    Across a generation that is false — an M5 core is not an M2 core — so the
+    rate cannot travel.
+
+    What can travel is the **fraction of the published peak the software stack
+    actually reaches**. That is a property of the compiler, the kernels and the
+    memory system's real behaviour rather than of any one core, and it is the
+    thing a vendor's peak figure never tells you. We measured roughly 90% of
+    dense fp16 peak and 76% of the published bus. Applying those fractions to
+    a newer part's published numbers gives a far better estimate than taking
+    its peak at face value, and a far worse one than measuring it.
+
+    **The honest limit, stated because it is the obvious objection.** This
+    assumes the toolchain extracts the new silicon about as well as it extracts
+    the measured silicon. For a mature architecture continuing along the same
+    line that is reasonable. For a genuinely new unit — a redesigned matrix
+    engine, a new Neural Engine generation — it is not, and the result is a
+    magnitude check rather than a ranking. A projection is never allowed to
+    outrank a measurement or a published benchmark result; `PROVENANCE_RANK`
+    enforces that.
+    """
+    if target.spec_peak_gflops is None and target.memory_bandwidth_gbs is None:
+        raise DerivationRefused(
+            f"{target.key} publishes neither a peak nor a bus width, so there "
+            f"is nothing to apply an achieved fraction to. Leave it "
+            f"UNAVAILABLE rather than inventing a figure.")
+
+    efficiency = anchor.compute_efficiency
+    if efficiency is None:
+        raise DerivationRefused(
+            f"the anchor {anchor.chip_key} has no published peak recorded, so "
+            f"its achieved fraction is unknown and nothing can be projected "
+            f"from it")
+
+    notes: list[str] = [
+        f"projected across a generation boundary: {anchor.chip_key} "
+        f"({anchor.gemm_fp16_gflops:.0f} GFLOP/s measured over {anchor.runs} "
+        f"runs) reaches {efficiency:.0%} of its published peak and "
+        f"{anchor.bandwidth_efficiency:.0%} of its published bus. Those "
+        f"fractions are applied to {target.key}'s published figures; no "
+        f"per-core rate crosses the boundary.",
+        f"{target.key} figures sourced as: {target.source}.",
+    ]
+
+    compute = None
+    if target.spec_peak_gflops is not None:
+        compute = target.spec_peak_gflops * efficiency
+        if target.dies > 1:
+            hops = interconnect_hops(target.dies)
+            compute *= multi_die_efficiency(target.dies)
+            notes.append(
+                f"{target.dies}-die package: {hops} worst-case crossing"
+                f"{'s' if hops > 1 else ''} applied on top of the projection.")
+
+    bandwidth = None
+    if target.memory_bandwidth_gbs is not None:
+        bandwidth = target.memory_bandwidth_gbs * anchor.bandwidth_efficiency
+
+    if target.family != anchor_family(anchor):
+        notes.append(
+            f"a new generation may extract its silicon better or worse than "
+            f"the {anchor_family(anchor)} stack did. Treat this as a magnitude "
+            f"check until {target.key} is measured or published.")
+
+    return DerivedDevice(
+        key=target.key,
+        gemm_fp16_gflops=compute if compute is not None else 0.0,
+        memory_bandwidth_gbs=bandwidth if bandwidth is not None else 0.0,
+        max_memory_gb=target.max_memory_gb or 0.0,
+        gpu_cores=target.gpu_cores or 0,
+        provenance=PROJECTED,
+        anchor_key=anchor.chip_key,
+        notes=tuple(notes),
+    )
+
+
+def anchor_family(anchor: Measurement) -> str:
+    """The generation the anchor belongs to, from the family table."""
+    spec = M2_FAMILY.get(anchor.chip_key)
+    return spec.family if spec else anchor.chip_key.upper()
+
+
 def best(*candidates: tuple[str, float | None]) -> tuple[str, float | None]:
     """Pick the best-sourced of several figures for the same quantity.
 
@@ -283,5 +470,11 @@ MEASURED_M2 = Measurement(
     gemm_fp16_gflops=2583.2,
     memory_bandwidth_gbs=75.7,
     spec_bandwidth_gbs=100.0,
+    # The 8-core part's published dense fp16 peak. The catalogue's 3.6 TFLOPS
+    # is the 10-core configuration, so 0.36 TFLOPS per core times 8. Comparing
+    # the measurement against the 10-core figure is what produced the "72% of
+    # peak" recorded earlier in this project; against the part actually
+    # measured the achieved fraction is about 90%.
+    spec_peak_gflops=2880.0,
     runs=3,
 )
