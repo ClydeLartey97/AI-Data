@@ -1,0 +1,50 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # The `apple` extra is omitted on purpose: MLX has no Linux wheels, and
+      # nothing outside the Apple measurement collectors imports it.
+      - name: Install
+        working-directory: grid-aware-scheduler
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Compile every module
+        working-directory: grid-aware-scheduler
+        run: python -m compileall -q adapters app core hardware
+
+      - name: Tests
+        working-directory: grid-aware-scheduler
+        env:
+          # Absent on a runner, and meant to be. The GB adapter must fail with
+          # a message naming this variable rather than taking the server down.
+          NATIONAL_GRID_TOOL_PATH: /nonexistent
+        run: python -m pytest tests -q
+
+      - name: No AI co-author trailers reached history
+        run: |
+          if git log --format='%B' | grep -i co-authored; then
+            echo "::error::a Co-Authored-By trailer is present in history"
+            exit 1
+          fi
