@@ -50,6 +50,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from hardware.base import Provenance
+from hardware.derive import DERIVED, PROJECTED
 
 GB = 1e9
 #: Fraction of peak arithmetic actually reached by a real transformer, as
@@ -138,12 +139,27 @@ class Prediction:
 
 
 def _weakest(*provenances: str) -> str:
-    """A derived figure is only as good as the worst input it used."""
+    """A derived figure is only as good as the worst input it used.
+
+    The ladder must list every tier the project can produce, including the two
+    that live in `hardware/derive.py` — DERIVED for a figure scaled to a
+    sibling of a measured chip, PROJECTED for one carried across a generation.
+    Omitting them was a real crash rather than a cosmetic gap: an unrecognised
+    label indexed one position past the end of the list, so planning against
+    any derived or projected device raised IndexError instead of returning the
+    honest answer. Unknown labels now clamp to the bottom of the ladder, which
+    is the safe direction — an unrecognised provenance is treated as the least
+    trustworthy input rather than crashing or, worse, being ignored.
+    """
     order = [Provenance.MEASURED.value, Provenance.PUBLISHED.value,
-             Provenance.SPEC.value, Provenance.ESTIMATED.value,
-             Provenance.SIMULATED.value, "UNAVAILABLE"]
-    ranks = [order.index(p) if p in order else len(order) for p in provenances]
-    return order[max(ranks)] if ranks else Provenance.ESTIMATED.value
+             DERIVED, PROJECTED, Provenance.SPEC.value,
+             Provenance.ESTIMATED.value, Provenance.SIMULATED.value,
+             "UNAVAILABLE"]
+    if not provenances:
+        return Provenance.ESTIMATED.value
+    ranks = [order.index(p) if p in order else len(order) - 1
+             for p in provenances]
+    return order[max(ranks)]
 
 
 def predict(workload: Workload, device: DeviceCapability, *,

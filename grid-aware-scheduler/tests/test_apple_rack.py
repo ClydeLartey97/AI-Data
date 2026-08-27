@@ -191,3 +191,53 @@ def test_a_plan_serialises_without_leaking_objects():
     assert payload["fits_per_board"] is True
     assert isinstance(payload["notes"], list)
     assert "board_prediction" not in payload
+
+
+# --- Planning against a derived or projected board ---
+
+def _projected_board() -> BoardSpec:
+    projected = derive.project(
+        derive.MEASURED_M2,
+        derive.published_part("m1-ultra", "M1",
+                              derive.M1_FAMILY["m1-ultra"]))
+    return board_from_projection(projected, board_watts=215.0,
+                                 memory_gb=128.0)
+
+
+def test_planning_against_a_projected_board_does_not_crash():
+    """Regression. The provenance ladder in roofline omitted DERIVED and
+    PROJECTED, so an unrecognised label indexed past the end of the list and
+    raised IndexError — planning against any scaled device died outright
+    rather than returning an honestly-labelled answer."""
+    result = plan(_small_model(), _projected_board(), REPORTED_CHASSIS)
+    assert result.fits_per_board is True
+    assert result.tokens_per_second is not None
+
+
+def test_a_projected_board_never_reports_a_measured_result():
+    result = plan(_small_model(), _projected_board(), REPORTED_CHASSIS)
+    assert result.provenance not in (Provenance.MEASURED.value,
+                                     Provenance.PUBLISHED.value)
+
+
+def test_independent_work_scales_throughput_but_not_efficiency():
+    """More machines buy linear throughput and no efficiency gain.
+
+    Worth locking, because the opposite is the intuitive expectation and it is
+    what a reader assumes when told a fleet "scales". Energy per token is a
+    property of the silicon, not of how many of them are bolted together.
+    """
+    board = _projected_board()
+    one = plan(_small_model(), board, ChassisSpec("one", boards=1))
+    eight = plan(_small_model(), board, ChassisSpec("eight", boards=8))
+    assert eight.tokens_per_second == pytest.approx(
+        one.tokens_per_second * 8)
+    assert eight.tokens_per_kwh == pytest.approx(one.tokens_per_kwh)
+
+
+def test_a_model_too_big_for_one_machine_is_refused_across_a_whole_cluster():
+    """Eight 128 GB machines is a terabyte, and none of it helps."""
+    huge = Workload("405B 4-bit", 405, weight_bits=4, batch=16)
+    result = plan(huge, _projected_board(), ChassisSpec("eight", boards=8))
+    assert result.fits_per_board is False
+    assert "1024" in " ".join(result.notes)
