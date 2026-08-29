@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Measure any Apple-silicon Mac's compute and memory ceiling. One file, no setup.
+"""Measure an Apple-silicon Mac's GPU compute and memory ceiling. One file, no setup.
+
+**Scope, stated first because it is the easiest thing to misread.** This
+measures the **GPU** via an MLX dense GEMM, plus the memory system it shares
+with everything else on the die. Apple silicon also carries CPU performance
+cores, CPU efficiency cores and a Neural Engine — four different architectures
+in one package. The Neural Engine in particular runs a great deal of Apple's
+real inference and is **not measured here**: MLX does not target it, and
+reaching it needs Core ML with an explicit compute-unit constraint. Read the
+numbers below as the GPU's ceiling, never as the device's total capability.
 
 **Written for a machine you do not own and cannot configure.** A shared or
 school Mac generally means no admin rights, no repository checkout, no
@@ -290,7 +299,7 @@ def headline(repeats: list[list[dict]]) -> dict:
 def report(host: dict, conditions: dict, summary: dict) -> str:
     lines = [
         "=" * 66,
-        "  APPLE SILICON MEASUREMENT — copy this block",
+        "  APPLE SILICON GPU MEASUREMENT — copy this block",
         "=" * 66,
         f"  Chip            {host.get('chip') or 'unknown'}",
         f"  Model           {host.get('model') or '?'} "
@@ -318,6 +327,7 @@ def report(host: dict, conditions: dict, summary: dict) -> str:
         f"  {WARMUP_ITERATIONS} warm-up discarded, {REPEATS} repeats.",
         f"  Starting load average {conditions.get('load_average_1m')}, "
         f"~{conditions.get('approx_free_memory_gb')} GB free.",
+        "  Scope: GPU only. The Neural Engine is not measured.",
         "=" * 66,
     ]
     spreads = [value for key, value in summary.items() if key.endswith("_spread")]

@@ -16,6 +16,29 @@ does not work across vendors. `derive` refuses both rather than producing a
 plausible number, because the entire value of this project's provenance
 discipline is that a figure never looks better sourced than it is.
 
+**This describes the GPU, and only the GPU.**
+
+Apple silicon carries three different compute architectures on one die: CPU
+performance cores, CPU efficiency cores, and the Neural Engine. They are not
+variants of each other, and a figure measured on one says nothing about the
+others. Everything in this module is anchored to an **MLX dense GEMM**, which
+runs on the GPU, so every rate it produces is GPU-scope.
+
+The Neural Engine is the omission that matters most, because it is not a
+peripheral unit — it is central to how Apple runs inference, and Apple is
+scaling it hard. Nothing here measures it, models it or includes it. MLX does
+not target it; reaching it needs Core ML with an explicit compute-unit
+constraint, which would be a separate collector producing a separate anchor.
+
+So a derived figure here is the arithmetic ceiling of a part's GPU. Reading it
+as whole-device capability would overstate what has been established, and
+`compute_unit` is carried on every measurement and every derived device so
+that scope travels with the number rather than living in this docstring.
+
+CPU cores are recorded on `ChipSpec` for identification only. Nothing is ever
+scaled from them, which is why the performance/efficiency split cannot corrupt
+a derived figure: CPU throughput is never derived at all.
+
 **Compute scales with cores. Bandwidth does not.**
 
 That distinction is the one thing here that is easy to get wrong and expensive
@@ -216,6 +239,11 @@ class Measurement:
     #: which is the only quantity that survives a generation change.
     spec_peak_gflops: float | None = None
     runs: int = 3
+    #: Which of the die's compute architectures this rate belongs to. The
+    #: default is "gpu" because every anchor so far comes from an MLX GEMM.
+    #: A Neural Engine measurement would be a different unit and must never
+    #: be scaled against a GPU one.
+    compute_unit: str = "gpu"
 
     @property
     def gflops_per_gpu_core(self) -> float:
@@ -253,11 +281,13 @@ class DerivedDevice:
     gpu_cores: int
     provenance: str
     anchor_key: str
+    compute_unit: str = "gpu"
     notes: tuple[str, ...] = ()
 
     def public_dict(self) -> dict:
         return {
             "key": self.key,
+            "compute_unit": self.compute_unit,
             "gemm_fp16_gflops": round(self.gemm_fp16_gflops, 1),
             "memory_bandwidth_gbs": round(self.memory_bandwidth_gbs, 1),
             "max_memory_gb": self.max_memory_gb,
@@ -326,6 +356,11 @@ def derive(anchor: Measurement, target: ChipSpec,
             f"cooled, so its sustained rate is likely higher than this. "
             f"Conservative rather than optimistic.")
 
+    notes.append(
+        f"{anchor.compute_unit.upper()} scope only. This is the arithmetic "
+        f"ceiling of the {anchor.compute_unit}; the Neural Engine is neither "
+        f"measured nor included, and Apple runs real inference on it.")
+
     return DerivedDevice(
         key=target.key,
         gemm_fp16_gflops=compute,
@@ -334,6 +369,7 @@ def derive(anchor: Measurement, target: ChipSpec,
         gpu_cores=target.gpu_cores,
         provenance=DERIVED,
         anchor_key=anchor.chip_key,
+        compute_unit=anchor.compute_unit,
         notes=tuple(notes),
     )
 
@@ -453,6 +489,10 @@ def project(anchor: Measurement, target: PublishedPart) -> DerivedDevice:
             f"the {anchor_family(anchor)} stack did. Treat this as a magnitude "
             f"check until {target.key} is measured or published.")
 
+    notes.append(
+        f"{anchor.compute_unit.upper()} scope only, carried from the anchor. "
+        f"The Neural Engine is not measured, modelled or included.")
+
     return DerivedDevice(
         key=target.key,
         gemm_fp16_gflops=compute if compute is not None else 0.0,
@@ -461,6 +501,7 @@ def project(anchor: Measurement, target: PublishedPart) -> DerivedDevice:
         gpu_cores=target.gpu_cores or 0,
         provenance=PROJECTED,
         anchor_key=anchor.chip_key,
+        compute_unit=anchor.compute_unit,
         notes=tuple(notes),
     )
 
@@ -532,6 +573,12 @@ def validate_projection(anchor: Measurement, target: PublishedPart,
     """
     if not 0 < tolerance < 1:
         raise ValueError("tolerance must be a fraction between 0 and 1")
+    if anchor.compute_unit != measured.compute_unit:
+        raise DerivationRefused(
+            f"cannot score a {anchor.compute_unit} projection against a "
+            f"{measured.compute_unit} measurement. They are different "
+            f"architectures on the same die, and agreement or disagreement "
+            f"between them would mean nothing.")
 
     predicted = project(anchor, target)
     if measured.gemm_fp16_gflops <= 0 or measured.memory_bandwidth_gbs <= 0:

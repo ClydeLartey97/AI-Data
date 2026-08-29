@@ -35,6 +35,13 @@ licence does **not** extend to splitting one model across boards, where the
 backplane becomes the bottleneck and nobody here has measured it. `plan`
 serves the first case and refuses the second.
 
+*Throughput here is GPU-scope.* Every board figure traces back to an MLX dense
+GEMM, which runs on the GPU. Apple silicon also carries a Neural Engine, which
+is central to how Apple actually serves inference and which nothing here
+measures. A rack's real serving throughput could therefore differ from these
+numbers in either direction, and `plan` says so on every result rather than
+letting a GPU ceiling read as whole-device capability.
+
 *Chassis geometry is declared, never assumed.* Board count, per-board memory
 and power come from the operator. `REPORTED_CHASSIS` records a published
 figure as one worked example with its source attached, and it is a starting
@@ -267,6 +274,11 @@ def plan(workload: Workload, board: BoardSpec, chassis: ChassisSpec,
             "declared figure; the power result is no better than ESTIMATED "
             "until an operator supplies the real one.")
     notes.append(f"chassis geometry: {chassis.source}")
+    notes.append(
+        "throughput is GPU-scope: it descends from a dense GEMM on the GPU. "
+        "The Neural Engine is not measured or included, and Apple serves real "
+        "inference on it, so treat this as the GPU's ceiling rather than the "
+        "board's total serving capacity.")
 
     return RackPlan(
         workload=workload.name,

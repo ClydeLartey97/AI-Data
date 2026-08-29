@@ -358,3 +358,58 @@ def test_a_score_serialises_for_the_record():
                   predicted.memory_bandwidth_gbs)).public_dict()
     assert payload["target"] == "m1-ultra"
     assert payload["holds"] is True
+
+
+# --- Compute-unit scope: a GPU figure is not a device figure ---
+
+def test_a_measurement_declares_which_compute_unit_it_belongs_to():
+    """Apple silicon has four architectures on one die. The anchor is a GPU
+    GEMM, and nothing here has ever touched the Neural Engine."""
+    assert derive_module.MEASURED_M2.compute_unit == "gpu"
+
+
+def test_scope_travels_onto_every_derived_device():
+    for device in derive_module.derive_family(derive_module.MEASURED_M2).values():
+        assert device.compute_unit == "gpu"
+        assert device.public_dict()["compute_unit"] == "gpu"
+
+
+def test_a_derived_device_says_the_neural_engine_is_excluded():
+    """Without this a GPU ceiling reads as whole-device capability, which
+    would overstate what was established — Apple serves real inference on the
+    Neural Engine."""
+    device = derive_module.derive_family(derive_module.MEASURED_M2)["m2-max"]
+    assert any("Neural Engine" in note for note in device.notes)
+
+
+def test_scope_survives_a_cross_generation_projection():
+    projected = derive_module.project(
+        derive_module.MEASURED_M2,
+        derive_module.published_part("m1-ultra", "M1",
+                                     derive_module.M1_FAMILY["m1-ultra"]))
+    assert projected.compute_unit == "gpu"
+    assert any("Neural Engine" in note for note in projected.notes)
+
+
+def test_a_gpu_projection_cannot_be_scored_against_a_neural_engine_measurement():
+    """Different architectures on the same die. Agreement between them would
+    mean nothing, so the comparison is refused rather than reported."""
+    part = derive_module.published_part(
+        "m1-ultra", "M1", derive_module.M1_FAMILY["m1-ultra"])
+    ane = derive_module.Measurement(
+        chip_key="m1-ultra", gpu_cores=64, gemm_fp16_gflops=5000.0,
+        memory_bandwidth_gbs=600.0, spec_bandwidth_gbs=800.0,
+        spec_peak_gflops=21000.0, compute_unit="ane")
+    with pytest.raises(derive_module.DerivationRefused, match="different"):
+        derive_module.validate_projection(derive_module.MEASURED_M2, part, ane)
+
+
+def test_cpu_cores_are_recorded_but_never_scaled():
+    """P-cores and E-cores are different microarchitectures. They are held for
+    identification only — nothing derives CPU throughput, which is why the
+    heterogeneity cannot corrupt a derived figure."""
+    spec = derive_module.M2_FAMILY["m2"]
+    assert spec.performance_cores and spec.efficiency_cores
+    for device in derive_module.derive_family(derive_module.MEASURED_M2).values():
+        assert "performance_cores" not in device.public_dict()
+        assert "efficiency_cores" not in device.public_dict()
