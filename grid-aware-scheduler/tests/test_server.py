@@ -591,3 +591,41 @@ def test_a_typed_facility_cannot_silently_override_the_declared_site(
         }), timeout=10)
     assert caught.value.code == 400
     assert "not both" in caught.value.read().decode()
+
+
+def test_workload_types_endpoint_serves_the_selector_contract(local_server):
+    """The interface builds its type selector and its per-type form from this,
+    which is what stops a ninth workload type needing its own page."""
+    _, payload = _json(f"{local_server}/api/v1/workload-types")
+    types = {entry["type"] for entry in payload["workload_types"]}
+    assert types == {"ai_training", "ai_inference", "mining", "rendering",
+                     "hpc", "data_processing", "batch", "custom"}
+    for entry in payload["workload_types"]:
+        assert entry["label"] and entry["work_unit"]
+        assert isinstance(entry["fields"], list)
+
+
+def test_only_mining_is_flagged_continuous_over_http(local_server):
+    _, payload = _json(f"{local_server}/api/v1/workload-types")
+    continuous = {entry["type"] for entry in payload["workload_types"]
+                  if entry["continuous"]}
+    assert continuous == {"mining"}
+
+
+def test_objectives_declare_which_need_machinery_beyond_planner_weights(
+        local_server):
+    """max_renewable and max_profit cannot be expressed as cost/carbon/delay
+    weights, and the interface must not offer them as though they could."""
+    _, payload = _json(f"{local_server}/api/v1/workload-types")
+    objectives = {entry["objective"]: entry for entry in payload["objectives"]}
+    assert objectives["balanced"]["expressible_as_weights"] is True
+    for key in ("max_renewable", "max_profit"):
+        assert objectives[key]["expressible_as_weights"] is False
+        assert objectives[key]["handled_by"]
+
+
+def test_energy_source_kinds_cover_the_declared_facility_options(local_server):
+    _, payload = _json(f"{local_server}/api/v1/workload-types")
+    kinds = set(payload["energy_source_kinds"])
+    assert {"solar", "wind", "hydro", "gas", "grid"} <= kinds
+    assert "contractual" in payload["delivery_types"]

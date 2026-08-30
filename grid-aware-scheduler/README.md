@@ -1,7 +1,12 @@
 # AI Data Centre Optimiser
 
-**Decides which accelerator runs which AI workload, where, when, and on which
+**Decides which computational workload runs where, when, and on which
 physically available supply of electricity.**
+
+AI training and inference are two workload types among eight. The others are
+proof-of-work mining, 3D rendering and video, HPC simulation, ETL, general
+batch and a custom type. What they share is not the work — it is that someone
+pays for the power.
 
 AI facilities are power-constrained rather than clock-constrained. The binding
 limit on a datacentre is increasingly its grid connection, not its capital

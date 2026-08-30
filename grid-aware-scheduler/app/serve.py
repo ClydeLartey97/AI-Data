@@ -37,7 +37,8 @@ from urllib.parse import parse_qs, urlsplit
 from app import (api, dashboard, decisions, planner, simulator, site,
                  workloads)
 from app.markets import load_market, summarise_market
-from core import audit_store, evidence_store, pilot_report, site_profile
+from core import (audit_store, energy, evidence_store, objectives,
+                  pilot_report, site_profile, workload_types)
 from core.grid import Job
 from hardware.providers import LocalDetector, RedfishFleetProvider
 from hardware.calibration import load_profiles
@@ -305,6 +306,21 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                     "api_version": api.API_VERSION,
                     "sites": sites,
                     "refreshing": refreshing,
+                })
+                return
+            if path == "/api/v1/workload-types":
+                # The selector contract: every workload type, its label, and
+                # the type-specific fields a form should render. The interface
+                # is generated from this rather than hand-written per type,
+                # which is what stops a ninth type needing its own page.
+                self._send_json({
+                    "api_version": api.API_VERSION,
+                    "product_version": api.PRODUCT_VERSION,
+                    "workload_types": workload_types.catalogue(),
+                    "objectives": objectives.catalogue(),
+                    "work_units": sorted(workload_types.WORK_UNITS),
+                    "energy_source_kinds": sorted(energy.SOURCE_KINDS),
+                    "delivery_types": sorted(energy.DELIVERY_TYPES),
                 })
                 return
             if path == "/api/v1/scan":
