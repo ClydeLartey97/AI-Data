@@ -59,6 +59,15 @@ def _validated(report: dict) -> bool:
     diagnostic can never be mistaken for evidence later.
     """
     context = report.get("context") or {}
+    if report.get("schema") == "ai-energy-hardware-measurement-v1":
+        validation = report.get("validation") or {}
+        eligible = validation.get("eligible_metrics") or {}
+        return bool(
+            report.get("status") == "accepted"
+            and validation.get("accepted") is True
+            and eligible.get("throughput") is True
+            and context.get("captured_at")
+        )
     return bool(context.get("captured_at"))
 
 
@@ -78,6 +87,15 @@ def record_run(report: dict, path: Path | None = None) -> int:
         raise ValueError("report observed_at is not a timestamp") from exc
 
     with closing(connect(path)) as connection, connection:
+        if report.get("schema") == "ai-energy-hardware-measurement-v1":
+            duplicate = connection.execute(
+                "SELECT run_id FROM baseline_runs WHERE device = ? AND stack = ? "
+                "AND observed_at = ? LIMIT 1",
+                (device, stack, str(report["observed_at"])),
+            ).fetchone()
+            if duplicate:
+                raise ValueError(
+                    f"measurement was already imported as run {duplicate['run_id']}")
         cursor = connection.execute(
             "INSERT INTO baseline_runs"
             " (device, stack, observed_at, recorded_at, validated, payload_json)"
@@ -124,21 +142,33 @@ def baseline(device: str, *, path: Path | None = None,
              min_runs: int = MIN_RUNS) -> dict:
     """Promote repeated validated runs into one device ceiling, or explain why not."""
     runs = history(device, validated_only=True, path=path)
-    if len(runs) < min_runs:
+    if not runs:
         return {
             "device": device,
             "established": False,
-            "run_count": len(runs),
-            "reason": (f"{len(runs)} validated run(s); {min_runs} separate runs "
+            "run_count": 0,
+            "reason": (f"0 validated run(s); {min_runs} separate runs "
                        "are required before a ceiling is treated as reproduced"),
         }
-    stacks = {run.get("stack") for run in runs[:min_runs]}
-    if len(stacks) != 1:
+    # A software update starts a new evidence series. Never allow older-stack
+    # measurements to enter the median just because three newer rows happen to
+    # sit first in history.
+    stack = runs[0].get("stack")
+    comparable = [run for run in runs if run.get("stack") == stack]
+    if len(comparable) < min_runs:
+        mixed = len(comparable) != len(runs)
         return {
             "device": device,
             "established": False,
-            "run_count": len(runs),
-            "reason": "runs span different software stacks and are not comparable",
+            "run_count": len(comparable),
+            "total_run_count": len(runs),
+            "stack": stack,
+            "reason": (
+                f"{len(comparable)} validated run(s) for the latest stack; "
+                f"{min_runs} separate runs are required"
+                + ("; other runs use different software stacks and are not comparable"
+                   if mixed else " before a ceiling is treated as reproduced")
+            ),
         }
 
     metrics: dict[str, Any] = {}
@@ -146,13 +176,15 @@ def baseline(device: str, *, path: Path | None = None,
         ("gemm_fp32_gflops", "gemm", "float32"),
         ("gemm_fp16_gflops", "gemm", "float16"),
         ("memory_bandwidth_gbs", "memory_bandwidth", None),
+        ("board_power_watts", "board_power", None),
         # Model-level rates, which are workload throughput rather than a
         # ceiling; they are reported separately and never averaged together.
         ("prefill_tokens_per_second", "prefill", None),
         ("decode_tokens_per_second", "decode", None),
     ):
         values = [value for value in
-                  (_rate(run, name, dtype) for run in runs) if value is not None]
+                  (_rate(run, name, dtype) for run in comparable)
+                  if value is not None]
         if len(values) < min_runs:
             continue
         median = statistics.median(values)
@@ -164,16 +196,22 @@ def baseline(device: str, *, path: Path | None = None,
             if median else 0.0,
             "samples": len(values),
         }
-    return {
+    result = {
         "device": device,
         "established": bool(metrics),
-        "run_count": len(runs),
-        "stack": stacks.pop(),
+        "run_count": len(comparable),
+        "total_run_count": len(runs),
+        "stack": stack,
         "metrics": metrics,
         "scope": "ceiling",
         "note": ("Achievable rate on ideal dense work. Not a workload "
                  "throughput and not a substitute for model-level measurement."),
     }
+    if "board_power_watts" in metrics:
+        result["power_scope"] = "board"
+        result["power_note"] = (
+            "GPU card only; excludes CPU, RAM, fans, PSU losses and facility overhead")
+    return result
 
 
 def summary(path: Path | None = None) -> dict:

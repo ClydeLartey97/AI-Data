@@ -70,6 +70,40 @@ def test_runs_from_different_software_stacks_are_not_comparable(tmp_path):
     assert "different software stacks" in state["reason"]
 
 
+def test_older_stack_values_never_enter_latest_stack_baseline(tmp_path):
+    path = tmp_path / "b.sqlite"
+    baseline_store.record_run(_report(gflops=99_999.0, stack="mlx-old"), path)
+    for index, rate in enumerate((2400.0, 2500.0, 2600.0)):
+        baseline_store.record_run(_report(
+            gflops=rate, stack="mlx-new",
+            observed=f"2026-08-2{index + 1}T10:00:00+00:00"), path)
+
+    state = baseline_store.baseline("Apple M2", path=path)
+
+    assert state["established"] is True
+    assert state["stack"] == "mlx-new"
+    assert state["run_count"] == 3
+    assert state["total_run_count"] == 4
+    assert state["metrics"]["gemm_fp16_gflops"]["median"] == 2500.0
+
+
+def test_matched_board_power_keeps_its_scope(tmp_path):
+    path = tmp_path / "b.sqlite"
+    for index, watts in enumerate((300.0, 310.0, 320.0)):
+        report = _report(observed=f"2026-08-2{index + 1}T10:00:00+00:00")
+        report["measurements"].append({
+            "name": "board_power", "dtype": "float16", "rate": watts,
+            "unit": "W", "scope": "board",
+        })
+        baseline_store.record_run(report, path)
+
+    state = baseline_store.baseline("Apple M2", path=path)
+
+    assert state["metrics"]["board_power_watts"]["median"] == 310.0
+    assert state["power_scope"] == "board"
+    assert "excludes CPU" in state["power_note"]
+
+
 def test_history_is_append_only_and_newest_first(tmp_path):
     path = tmp_path / "b.sqlite"
     for index in range(3):
