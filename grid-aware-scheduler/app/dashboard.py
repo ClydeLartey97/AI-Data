@@ -30,7 +30,7 @@ from adapters.gb_regional import GBRegionalAdapter
 from core import analytics, feed
 from app.panels import (EXPAND_JS, PANEL_CSS, duration_panel, profile_panel,
                         savings_panel, scatter_panel)
-from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS
+from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS, product_nav
 from app.chart import CHART_CSS, Band, ChartSeries, chart
 from core.grid import Job, cheapest_window, cleanest_window, compare, run_immediately
 
@@ -249,7 +249,7 @@ def _regions_card() -> str:
 
     return f"""
 <section class="card">
-  <h2>Where, not just when</h2>
+  <h2>Carbon by region</h2>
   <p class="note">
 <b>{html.escape(lo.name)} {lo.carbon_forecast:,.0f}</b> ·
     <b>{html.escape(hi.name)} {hi.carbon_forecast:,.0f}</b> gCO₂/kWh, same instant.
@@ -294,17 +294,15 @@ def _analytics_grid(series: list[GridDataPoint], symbol: str) -> str:
     return f"""
 <section class="grid4">
   <div class="pnl">
-    <h3>What a deadline is worth <em>cost</em></h3>
+    <h3>Savings by deadline <em>cost</em></h3>
     {savings_panel(sav_cost, unit="% cost saved", color="--price")}
-    <p class="pnl-note">A 4&nbsp;h job at a <b>24&nbsp;h</b> deadline saves
-      <b>{head(day):.1f}%</b> median{f", at a week <b>{sav_cost.median[week]:.0f}%</b>" if week >= 0 else ""}.
-      Every start in {len(series)//48:,} days, not one example.</p>
+    <p class="pnl-note">4&nbsp;h job, 24&nbsp;h deadline: <b>{head(day):.1f}%</b> median saving{f"; 1 week: <b>{sav_cost.median[week]:.0f}%</b>" if week >= 0 else ""}.
+      All start times over {len(series)//48:,} days.</p>
   </div>
   <div class="pnl">
-    <h3>What a deadline is worth <em>carbon</em></h3>
+    <h3>Savings by deadline <em>carbon</em></h3>
     {savings_panel(sav_carb, unit="% carbon saved", color="--carbon")}
-    <p class="pnl-note">Same job, carbon objective: <b>{carb_day:.1f}%</b> median at 24&nbsp;h.
-      Lower than the cost figure — carbon is less volatile than price.</p>
+    <p class="pnl-note">4&nbsp;h job, 24&nbsp;h deadline: <b>{carb_day:.1f}%</b> median saving.</p>
   </div>
   <div class="pnl">
     <h3>Time of day <em>price</em></h3>
@@ -314,26 +312,24 @@ def _analytics_grid(series: list[GridDataPoint], symbol: str) -> str:
   <div class="pnl">
     <h3>Time of day <em>carbon</em></h3>
     {profile_panel(carbon_prof, color="--carbon", label="Mean carbon", unit=" gCO₂/kWh")}
-    <p class="pnl-note">The daily cycle a deadline longer than a day can exploit.</p>
+    <p class="pnl-note">Mean with p10–p90 band, by hour, whole history.</p>
   </div>
   <div class="pnl">
     <h3>Duration curve <em>price</em></h3>
     {duration_panel(dur_p, color="--price", label="Price", unit=f" {symbol}/MWh")}
-    <p class="pnl-note">Sorted worst to best. The steep left tail is where the money is.</p>
+    <p class="pnl-note">Every half-hour, sorted highest to lowest.</p>
   </div>
   <div class="pnl">
     <h3>Duration curve <em>carbon</em></h3>
     {duration_panel(dur_c, color="--carbon", label="Carbon", unit=" gCO₂/kWh")}
-    <p class="pnl-note">A flat middle means shifting within it buys little.</p>
+    <p class="pnl-note">Every half-hour, sorted highest to lowest.</p>
   </div>
   <div class="pnl span2">
-    <h3>Cheap is not clean <em>price vs carbon</em></h3>
+    <h3>Price vs carbon</h3>
     {scatter_panel(corr)}
     <p class="pnl-note">Correlation <b>r&nbsp;=&nbsp;{corr.get('r', 0):.2f}</b>.
-      The cheapest decile is also the cleanest decile only
-      <b>{corr.get('cheap_and_clean_pct', 0):.0f}%</b> of the time — so an operator
-      optimising purely on price misses the carbon target the rest of it. This is why
-      the objective has to be stated, not inferred.</p>
+      Cheapest 10% of half-hours that are also in the cleanest 10%:
+      <b>{corr.get('cheap_and_clean_pct', 0):.0f}%</b>.</p>
   </div>
 </section>"""
 
@@ -369,6 +365,12 @@ def render(series: list[GridDataPoint], job: Job, market: str, currency: str,
         simulator_href += "?" + shared_query
         operations_href += "?" + shared_query
         grid_view_href += "?" + shared_query
+    navigation = product_nav("energy", {
+        "overview": operations_href,
+        "plan": planner_href,
+        "hardware": simulator_href,
+        "energy": grid_view_href,
+    })
 
     # The decision must be made over the window a job would actually face —
     # the most recent deadline's worth of data — not over the whole history
@@ -606,9 +608,9 @@ svg [hidden] {{ display: none; }}
 <div class="wrap">
 
 <header>
-  <h1>Grid Signal</h1>
+  <span class="product-name">AI Energy</span><h1>Energy</h1>
   <p class="sub">{html.escape(market)} · {html.escape(location_name)} · {html.escape(range_start.strftime('%a %d %b'))} to {html.escape(series[-1].timestamp.strftime('%a %d %b %Y'))}</p>
-  <nav><a href="{html.escape(operations_href)}">Operations</a><a href="{html.escape(simulator_href)}">Fleet Lab</a><a href="{html.escape(planner_href)}">Placement Lab</a><a href="{html.escape(grid_view_href)}" class="on">Sites &amp; Grid</a><a href="/site">Site</a><a href="/decisions">Decisions</a></nav>
+  {navigation}
   {_market_controls(context)}
   <div class="badge">MEASURED · {html.escape(signal_mode)} · {complete_count} of {len(series)} half-hours fully scored</div>
 </header>
@@ -659,14 +661,12 @@ svg [hidden] {{ display: none; }}
 
 {"" if not disagree else f'''
 <section class="card">
-  <h2>The two objectives disagree</h2>
+  <h2>Cheapest and cleanest windows differ</h2>
   <p class="note">
-    The cheapest window starts {html.escape(scheduled.start_time.strftime('%H:%M'))} and the cleanest
-    starts {html.escape(clean.start_time.strftime('%H:%M'))} — different half-hours, and the choice
-    is not free. Going carbon-optimal costs {symbol}{clean.cost:,.2f} against {symbol}{scheduled.cost:,.2f},
-    a {symbol}{cost_penalty:,.2f} premium to save {(scheduled.carbon_g - clean.carbon_g) / 1000:,.2f} kgCO₂.
-    This is a real trade-off the scheduler must be told how to make, not one it can quietly
-    resolve on its own.
+    Cheapest window starts {html.escape(scheduled.start_time.strftime('%H:%M'))}; cleanest starts
+    {html.escape(clean.start_time.strftime('%H:%M'))}. The cleanest window costs {symbol}{clean.cost:,.2f}
+    against {symbol}{scheduled.cost:,.2f} ({symbol}{cost_penalty:,.2f} more) and saves
+    {(scheduled.carbon_g - clean.carbon_g) / 1000:,.2f} kgCO₂.
   </p>
   <div class="tiles">
     {_tile("Cost-optimal", html.escape(scheduled.start_time.strftime('%H:%M')), f"{symbol}{scheduled.cost:,.2f} · {scheduled.carbon_kg:,.2f} kgCO₂", accent="--price")}

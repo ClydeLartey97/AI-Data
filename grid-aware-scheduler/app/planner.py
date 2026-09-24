@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 
 from app.markets import MarketContext
 from app.panels import EXPAND_JS, PANEL_CSS
-from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS
+from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS, product_nav
 from app.simulator import COUNTS, device_specs, model_specs
 from core import models as model_catalog
 
@@ -64,6 +64,15 @@ def render(context: MarketContext) -> str:
     operations_href = "/?" + urlencode({
         "market": context.market_key,
         "location": context.location_key,
+    })
+    navigation = product_nav("plan", {
+        "overview": operations_href,
+        "plan": "/planner?" + urlencode({
+            "market": context.market_key,
+            "location": context.location_key,
+        }),
+        "hardware": simulator_href,
+        "energy": grid_href,
     })
     custom_node = "" if not context.allows_custom_node else """
       <div class="ctl"><label for="customNode">Custom CAISO PNode</label>
@@ -147,18 +156,27 @@ th:first-child,td:first-child{{text-align:left}} tr.best td{{background:color-mi
 background:var(--card);color:var(--text);font:600 11px inherit;padding:7px 10px;cursor:pointer}}
 .actions button:hover{{border-color:var(--blue);color:var(--blue)}}
 .audit-status{{width:100%;text-align:right;color:var(--text-2);font-size:10px;min-height:15px}}
+.objective-choice{{margin-top:16px;padding:14px;border:1px solid var(--sep);border-radius:12px}}
+.objective-choice>span{{display:block;margin-bottom:8px;color:var(--text-2);font-size:11px;font-weight:600}}
+.objective-presets{{display:flex;gap:7px;flex-wrap:wrap}}.objective-presets button{{border:1px solid var(--sep);
+border-radius:9px;background:var(--card);color:var(--text-2);padding:7px 11px;font:600 12px inherit;cursor:pointer}}
+.objective-presets button:hover,.objective-presets button.on{{border-color:var(--blue);color:var(--blue);
+background:color-mix(in srgb,var(--blue) 7%,var(--card))}}.advanced-controls{{margin-top:14px;
+border-top:1px solid var(--sep);padding-top:12px}}.advanced-controls summary{{cursor:pointer;color:var(--text);
+font-size:13px;font-weight:650}}.advanced-controls summary span{{display:block;margin-top:2px;color:var(--text-2);
+font-size:11px;font-weight:500}}.advanced-controls>.controls{{margin-top:14px}}
 @media(max-width:800px){{.grid2{{grid-template-columns:1fr}}.trace,.method{{grid-template-columns:1fr 1fr}}
 .step::after{{display:none}}}} @media(max-width:560px){{h1{{font-size:32px}}body{{padding-left:14px;padding-right:14px}}
 .trace,.method{{grid-template-columns:1fr}}}}
 {THEME_CSS}
 </style></head><body><div class="wrap">
 {THEME_CONTROL}
-<header><h1>Placement Planner</h1>
-<p class="sub">Choose the hardware and half-hour that best satisfy an explicit operating objective.</p>
-<nav><a href="{html.escape(operations_href)}">Operations</a><a href="{html.escape(simulator_href)}">Fleet Lab</a><a class="on" href="/planner">Placement Lab</a><a href="{html.escape(grid_href)}">Sites &amp; Grid</a><a href="/site">Site</a><a href="/decisions">Decisions</a></nav></header>
+<header><span class="product-name">AI Energy</span><h1>Plan work</h1>
+<p class="sub">Choose what must run and when it must finish. The planner compares hardware, electricity cost and carbon automatically.</p>
+{navigation}</header>
 
-<section class="card"><h2>Operating constraints</h2>
-<p class="note">The selected location is a facility constraint. The planner searches every catalogued device and legal start window there.</p>
+<section class="card"><h2>Workload and deadline</h2>
+<p class="note">Start with the essentials. The selected location limits the search to electricity conditions that apply to this facility.</p>
 <div class="status"><b>{html.escape(context.signal_mode)}</b><span class="sep">|</span>
 {html.escape(context.market_name)}<span class="sep">|</span>{html.escape(context.location_name)}
 <span class="sep">|</span>{len(points)} half-hours</div>
@@ -184,6 +202,15 @@ background:var(--card);color:var(--text);font:600 11px inherit;padding:7px 10px;
   <div class="ctl"><label for="deadline">Deadline from first interval</label><select id="deadline">
     <option value="6">6 hours</option><option value="12">12 hours</option><option value="24" selected>24 hours</option>
     <option value="36">36 hours</option><option value="48">48 hours</option></select></div>
+  </div>
+  <div class="objective-choice"><span>Primary goal</span><div class="objective-presets">
+    <button type="button" data-objective="balanced">Balanced</button>
+    <button type="button" data-objective="cost">Lowest cost</button>
+    <button type="button" data-objective="carbon">Lowest carbon</button>
+    <button type="button" data-objective="speed">Earliest finish</button>
+  </div></div>
+  <details class="advanced-controls"><summary>Advanced constraints and tuning<span>Hard caps, memory assumptions, facility efficiency and custom weights</span></summary>
+  <div class="controls">
   <div class="ctl"><label for="maxCost">Hard cost cap · {html.escape(context.symbol)} (0 = off)</label>
     <input id="maxCost" type="number" min="0" step="0.01" value="0"></div>
   <div class="ctl"><label for="maxCarbon">Hard carbon cap · kg (0 = off)</label>
@@ -211,10 +238,10 @@ background:var(--card);color:var(--text);font:600 11px inherit;padding:7px 10px;
   <div class="ctl"><label for="costW">Cost weight</label><div class="range-row"><input id="costW" type="range" min="0" max="100" value="50"><span class="weight" id="costWV">50</span></div></div>
   <div class="ctl"><label for="carbonW">Carbon weight</label><div class="range-row"><input id="carbonW" type="range" min="0" max="100" value="50"><span class="weight" id="carbonWV">50</span></div></div>
   <div class="ctl"><label for="delayW">Delay weight</label><div class="range-row"><input id="delayW" type="range" min="0" max="100" value="0"><span class="weight" id="delayWV">0</span></div></div>
-</div></section>
+</div></details></section>
 
-<section class="card" id="decision"><div class="section-head"><div><h2>Recommended placement</h2>
-<p class="note">Exact enumeration across feasible devices and starts.</p></div><div class="actions">
+<section class="card" id="decision"><div class="section-head"><div><h2>Recommended schedule</h2>
+<p class="note">The best eligible hardware and start time for the goal above.</p></div><div class="actions">
 <button type="button" id="saveDecision">Save audited decision</button><button type="button" id="copyLink">Copy review link</button>
 <button type="button" id="exportPlan">Plan JSON</button><button type="button" id="exportCsv">Alternatives CSV</button>
 <div class="audit-status" id="auditStatus" aria-live="polite"></div></div></div>
@@ -319,6 +346,7 @@ series:[{{name:"Feasible",color:"--blue",pointsOnly:true,radius:2.7,points:pts.f
 {{name:"Pareto frontier",color:"--green",pointsOnly:true,radius:4,points:pts.filter(x=>x.pareto&&x!==selected).map(inspectorPoint)}},
 {{name:"Selected",color:"--orange",pointsOnly:true,radius:5.5,points:selected?[inspectorPoint(selected)]:[]}}]}})}}
 function renderPlan(){{["costW","carbonW","delayW"].forEach(k=>document.getElementById(k+"V").textContent=S[k]);
+var preset=S.costW===50&&S.carbonW===50&&S.delayW===0?"balanced":S.costW===100&&S.carbonW===0&&S.delayW===0?"cost":S.costW===0&&S.carbonW===100&&S.delayW===0?"carbon":S.costW===0&&S.carbonW===0&&S.delayW===100?"speed":"";document.querySelectorAll("[data-objective]").forEach(function(button){{button.classList.toggle("on",button.dataset.objective===preset)}});
 var box=document.getElementById("result");if(S.costW+S.carbonW+S.delayW<=0){{LAST_PLAN=null;box.innerHTML='<div class="empty"><b>No objective selected.</b> Set at least one of the cost, carbon or delay weights above zero.</div>';
 document.getElementById("rows").innerHTML="";drawChart([],null);return}}var plan=enumerate(),out=plan.options;if(!out.length){{box.innerHTML='<div class="empty"><b>No feasible plan.</b> Adjust the deadline, fleet size, memory mode, or objective signals.</div>';
 LAST_PLAN=null;document.getElementById("rows").innerHTML="";drawChart([],null);return}}var x=out[0],m=M[S.model],d=x.e.d,ts=new Date(x.time),finish=x.finish;LAST_PLAN={{selected:x,options:out}};
@@ -379,6 +407,7 @@ status.appendChild(link);
 }}catch(error){{status.textContent="Not saved: "+error.message}}}});
 loadState();validateState();["model","precision","count","tokens","deadline","shard","statebytes","headroom","context","batch","kvprecision","pue","system","maxCost","maxCarbon","maxDelay"].forEach(function(id){{var el=document.getElementById(id);el.value=String(S[id]);el.addEventListener("change",function(){{S[id]=["model","precision","shard","kvprecision"].includes(id)?el.value:+el.value;renderPlan()}})}});
 ["costW","carbonW","delayW"].forEach(function(id){{var el=document.getElementById(id);el.value=S[id];el.addEventListener("input",function(){{S[id]=+el.value;renderPlan()}})}});
+document.querySelectorAll("[data-objective]").forEach(function(button){{button.addEventListener("click",function(){{var weights={{balanced:[50,50,0],cost:[100,0,0],carbon:[0,100,0],speed:[0,0,100]}}[button.dataset.objective];["costW","carbonW","delayW"].forEach(function(id,index){{S[id]=weights[index];document.getElementById(id).value=weights[index]}});renderPlan()}})}});
 document.querySelectorAll("#task button").forEach(function(b){{b.classList.toggle("on",b.dataset.task===S.task);b.addEventListener("click",function(){{S.task=b.dataset.task;document.querySelectorAll("#task button").forEach(x=>x.classList.toggle("on",x===b));document.querySelectorAll(".training-only").forEach(x=>x.classList.toggle("hide",S.task!=="training"));document.querySelectorAll(".inference-only").forEach(x=>x.classList.toggle("hide",S.task!=="inference"));renderPlan()}})}});
 document.querySelectorAll(".training-only").forEach(x=>x.classList.toggle("hide",S.task!=="training"));document.querySelectorAll(".inference-only").forEach(x=>x.classList.toggle("hide",S.task!=="inference"));
 document.getElementById("market").addEventListener("change",function(){{var defaults={{GB:"national",CAISO:"sp15",NYISO:"nyc"}};goMarket(this.value,defaults[this.value]||"national")}});

@@ -8,7 +8,7 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parents[1]
 PYTHON = Path.home() / "venvs" / "national-grid" / "bin" / "python"
 LAUNCH = PROJECT / "scripts" / "launch.py"
-OUTPUT = Path.home() / "Desktop" / "Grid-Aware Scheduler.app"
+OUTPUT = Path.home() / "Desktop" / "AI Energy.app"
 
 
 def quoted(value: Path) -> str:

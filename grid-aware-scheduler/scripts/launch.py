@@ -43,7 +43,7 @@ def notify(message: str) -> None:
     escaped = message.replace('"', '\\"')
     subprocess.run([
         "osascript", "-e",
-        f'display notification "{escaped}" with title "Grid-Aware Scheduler"',
+        f'display notification "{escaped}" with title "AI Energy"',
     ], check=False)
 
 

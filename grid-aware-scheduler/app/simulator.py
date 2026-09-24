@@ -34,7 +34,7 @@ from core.grid import PERIOD_HOURS
 from core.renewables import solar_capacity_factor, wind_capacity_factor
 from hardware import catalogue
 from app.panels import EXPAND_JS, PANEL_CSS
-from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS
+from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS, product_nav
 
 OUT = Path(__file__).resolve().parent / "build" / "simulator.html"
 
@@ -186,6 +186,12 @@ def render(devices: dict, models: dict, grid: dict, sites: dict,
     query = urlencode({"market": market_key, "location": location_key})
     grid_href, planner_href = f"/grid?{query}", f"/planner?{query}"
     operations_href = f"/?{query}"
+    navigation = product_nav("hardware", {
+        "overview": operations_href,
+        "plan": planner_href,
+        "hardware": f"/simulator?{query}",
+        "energy": grid_href,
+    })
     grid_controls = "" if not grid_locations else f"""
     <div class="ctl"><label for="marketSelect">Power market</label><select id="marketSelect">
       <option value="GB"{" selected" if market_key == "GB" else ""}>Great Britain</option>
@@ -352,13 +358,13 @@ border:1px solid var(--sep);background:var(--card);color:var(--text)}}
 <div class="wrap">
 
 <header>
-  <h1>Model Simulator</h1>
-  <p class="sub">How a model runs on hardware you don't have — and what the grid charges for it.</p>
-  <nav><a href="{html.escape(operations_href)}">Operations</a><a href="/simulator?{html.escape(query)}" class="on">Fleet Lab</a><a href="{html.escape(planner_href)}">Placement Lab</a><a href="{html.escape(grid_href)}">Sites &amp; Grid</a><a href="/site">Site</a><a href="/decisions">Decisions</a></nav>
+  <span class="product-name">AI Energy</span><h1>Hardware</h1>
+  <p class="sub">Check whether a model fits, estimate its runtime and power, and compare the result with measured hardware as it becomes available.</p>
+  {navigation}
 </header>
 
 <section class="card">
-  <h2>Configuration</h2>
+  <h2>Model and hardware</h2>
   <p class="note">{note}</p>
   {detected_banner}
   <div class="controls">
@@ -421,7 +427,7 @@ border:1px solid var(--sep);background:var(--card);color:var(--text)}}
 
 <section class="card pnl">
   <h2>Allocation path</h2>
-  <p class="note">Work splits across groups in proportion to what each can actually deliver, so every group finishes together. Split evenly instead and the slowest sets the finish time while the fastest idle at part load.</p>
+  <p class="note">Work is split by each group's throughput so all groups finish together.</p>
   <div class="fleet" id="fleet"></div>
   <div class="fleet-add">
     <select id="addDev"></select>
@@ -452,15 +458,15 @@ border:1px solid var(--sep);background:var(--card);color:var(--text)}}
 </section>
 
 <section class="card">
-  <h2>Every device, ranked by energy</h2>
-  <p class="note">Greyed rows don't fit in memory.</p>
+  <h2>Devices ranked by energy</h2>
+  <p class="note">Grey rows do not fit in memory.</p>
   <div style="overflow-x:auto"><table id="cmp"><thead><tr>
     <th>Device</th><th>Runtime</th><th>Power</th><th>Energy</th><th>Memory</th><th>Cost</th><th>CO₂</th>
   </tr></thead><tbody></tbody></table></div>
 </section>
 
 <section class="card">
-  <h2>Does adding hardware help?</h2>
+  <h2>Runtime and energy by fleet size</h2>
   
   <div style="overflow-x:auto"><table id="scale"><thead><tr>
     <th>Fleet size</th><th>Runtime</th><th>Energy</th><th>Scaling</th><th>Memory</th>

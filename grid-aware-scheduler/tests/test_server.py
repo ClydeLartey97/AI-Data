@@ -101,7 +101,7 @@ def test_decision_journal_is_served_without_market_fetch(local_server):
     with urllib.request.urlopen(f"{local_server}/decisions", timeout=10) as response:
         page = response.read().decode()
     assert response.status == 200
-    assert "Decision journal" in page
+    assert "<h2>History</h2>" in page
     assert "/api/v1/decisions?limit=200" in page
 
 
@@ -195,8 +195,8 @@ def test_workload_queue_page_is_linked_to_portfolio_api(local_server):
     ) as response:
         page = response.read().decode()
     assert response.status == 200
-    assert "AI Data Centre Operations" in page
-    assert "Demand, evidence and service state" in page
+    assert "Operations overview" in page
+    assert "What is ready" in page
     assert "/api/v1/portfolio?market=" in page
     assert 'href="/decisions"' in page
 
@@ -210,10 +210,10 @@ def test_home_is_ai_operations_and_grid_is_specialist_view(local_server):
         f"{local_server}/grid?market=GB&location=london", timeout=10
     ) as response:
         grid = response.read().decode()
-    assert "AI Data Centre Operations" in home
-    assert "Operator control plane" in home
-    assert "Grid Signal" in grid
-    assert ">Sites &amp; Grid</a>" in grid
+    assert "Operations overview" in home
+    assert "Current plan" in home
+    assert "<h1>Energy</h1>" in grid
+    assert ">Energy</a>" in grid
 
 
 def _evidence_payload(index: int) -> dict:

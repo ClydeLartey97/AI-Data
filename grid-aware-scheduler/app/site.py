@@ -8,7 +8,7 @@ is vague about it.
 """
 from __future__ import annotations
 
-from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS
+from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS, product_nav
 
 _PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -53,12 +53,14 @@ border-bottom:1px solid var(--line)}.summary div:last-child{border-bottom:0}
 .summary span{color:var(--muted)}.summary b{font-weight:600;text-align:right}
 .warn{color:var(--amber);line-height:1.5;margin:10px 0 0}
 @media(max-width:900px){.split{grid-template-columns:1fr}}
+@media(max-width:700px){header{height:auto;padding:12px 58px 12px 16px;align-items:flex-start;gap:8px;
+flex-direction:column}body>.theme-control~header{padding-right:58px}main{padding-top:24px}}
 __THEME_CSS__
 </style></head>
 <body>__THEME_CONTROL__
-<header><h1>AI Data Centre Operations</h1><nav><a href="/">Operations</a><a href="/simulator">Fleet Lab</a><a href="/planner">Placement Lab</a><a href="/grid">Sites &amp; Grid</a><a class="on" href="/site">Site</a><a href="/decisions">Decisions</a></nav></header>
+<header><h1>AI Energy</h1>__PRODUCT_NAV__</header>
 <main>
-<div class="intro"><div class="eyebrow">Energy declaration</div><h2>Declare your site</h2>
+<div class="intro"><div class="eyebrow">Setup step 1</div><h2>Site setup</h2>
 <p>Enter the site once. Everything here comes from a connection agreement, a power purchase agreement or a datasheet — the software does the arithmetic and keeps the source of every figure attached to it. Generation you own or take over a dedicated wire raises how much compute can run at the same time; a contractual instrument is recorded and never powers an accelerator.</p></div>
 <div class="split">
 <div>
@@ -257,6 +259,7 @@ def render() -> str:
     """Return the self-contained declaration page."""
     page = _PAGE.replace("__THEME_BOOTSTRAP__", THEME_BOOTSTRAP)
     page = page.replace("__THEME_CSS__", THEME_CSS)
+    page = page.replace("__PRODUCT_NAV__", product_nav("site"))
     if "__THEME_CONTROL__" not in page:
         raise AssertionError("theme control anchor missing from site page")
     return page.replace("__THEME_CONTROL__", THEME_CONTROL)

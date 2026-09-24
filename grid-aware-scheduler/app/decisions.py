@@ -1,7 +1,7 @@
 """Operator-facing audit journal for persisted scheduling decisions."""
 from __future__ import annotations
 
-from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS
+from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS, product_nav
 
 
 def render() -> str:
@@ -52,8 +52,8 @@ max-height:calc(100vh - 92px);overflow:auto}.detail h3{font-size:22px;letter-spa
 :root[data-theme="dark"]{--bg:#000;--card:#1c1c1e;--text:#f5f5f7;--muted:#a1a1aa;--line:#343438;--blue:#0a84ff;--green:#32a852;--amber:#ff9f0a;--shadow:none}
 """ + THEME_CSS + """
 </style></head><body>""" + THEME_CONTROL + """
-<header><h1>AI Data Centre Operations</h1><nav><a href="/">Operations</a><a href="/simulator">Fleet Lab</a><a href="/planner">Placement Lab</a><a href="/grid">Sites &amp; Grid</a><a href="/site">Site</a><a class="on" href="/decisions">Decisions</a></nav></header>
-<main><div class="intro"><div><div class="eyebrow">Audit and evidence</div><h2>Decision journal</h2><p>Every saved recommendation is immutable. Open a row to inspect its constraints, selected placement, signal provenance and realised score.</p></div>
+<header><h1>AI Energy</h1>""" + product_nav("history") + """</header>
+<main><div class="intro"><div><div class="eyebrow">Review</div><h2>History</h2><p>Every saved recommendation is immutable. Open a row to inspect its constraints, selected placement, signal provenance and realised score.</p></div>
 <div class="metrics"><div class="metric"><b id="total">0</b><span>Saved</span></div><div class="metric"><b id="scored">0</b><span>Scored</span></div><div class="metric"><b id="pending">0</b><span>Awaiting outturn</span></div></div></div>
 <div class="toolbar card"><input id="search" type="search" placeholder="Search ID, model, hardware or location" aria-label="Search decisions"><select id="status" aria-label="Filter by status"><option value="all">All evidence states</option><option value="scored">Scored</option><option value="awaiting_outturn">Awaiting outturn</option></select><button id="refresh" type="button">Refresh</button><button id="report" type="button">Pilot report</button></div>
 <div class="split"><div class="col"><section class="card table-wrap" id="journal"><table><thead><tr><th>Created</th><th>Market</th><th>Workload</th><th>Placement</th><th>Scheduled</th><th>Forecast cost</th><th>Forecast carbon</th><th>Evidence</th></tr></thead><tbody id="rows"></tbody></table><div class="empty" id="empty">Loading decisions…</div></section>

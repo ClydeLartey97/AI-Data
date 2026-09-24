@@ -136,7 +136,7 @@ def test_decision_journal_javascript_parses():
     for i, block in enumerate(SCRIPT_RE.findall(html)):
         ok, err = _check_js(block)
         assert ok, f"decision journal script block {i} invalid:\n{err}"
-    for token in ("Decision journal", "/api/v1/decisions?limit=200",
+    for token in ("<h2>History</h2>", "/api/v1/decisions?limit=200",
                   "Awaiting outturn", "Download JSON"):
         assert token in html
 
@@ -149,17 +149,17 @@ def test_workload_queue_javascript_parses():
         ok, err = _check_js(block)
         assert ok, f"workload queue script block {i} invalid:\n{err}"
     for token in (
-        "AI Data Centre Operations", "Operator control plane",
-        "Demand, evidence and service state", "/api/v1/portfolio?market=",
+        "Operations overview", "Current plan",
+        "What is ready", "/api/v1/portfolio?market=",
         "Total facility capacity", "Operator utility", "Minimum quality",
-        "Estimated scenario", "Plan JSON", "Schedule CSV", "Sites &amp; Grid",
-        "Generation-aware AI training", "Physical energy supply",
+        "Estimated scenario", "Plan JSON", "Schedule CSV", "Plan work",
+        "Generation-aware AI training", "Available power",
         "Solar", "Wind", "Hydro", "Nuclear", "Geothermal", "Biomass",
         "Gas", "Coal", "Oil", "Battery capacity", "Renewable match",
         "data-inspector", "Click to expand", "Exact physical facility",
         "Origin latitude", "Origin longitude", "Delivery loss", "Connection ID",
         "Price: GB national", "Carbon: GB national", "30 / 30 min",
-        "Governed evidence profile", "Governed execution profiles",
+        "Governed evidence profile", "Measured workload profiles",
         "Compare every compatible governed profile",
         "/api/v1/evidence/profiles", "/api/v1/evidence/probe",
         "Immutable observations", "Runner ready", "Verify local MLX",
@@ -237,7 +237,10 @@ def test_pages_are_linked_and_compact_panels_are_expandable():
         render_decisions(),
     ]
     for page in pages:
-        assert ">Operations</a>" in page
+        assert ">Overview</a>" in page
+        assert ">Plan work</a>" in page
+        assert ">Hardware</a>" in page
+        assert ">Energy</a>" in page
         assert 'href="/simulator"' in page or 'href="/simulator?' in page
         assert 'href="/planner"' in page or 'href="/planner?' in page
         assert 'href="/grid"' in page or 'href="/grid?' in page

@@ -34,8 +34,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from app import (api, dashboard, decisions, planner, simulator, site,
-                 workloads)
+from app import (api, dashboard, decisions, national_grid, planner, simulator,
+                 site, workloads)
 from app.markets import load_market, summarise_market
 from core import (audit_store, energy, evidence_store, objectives,
                   pilot_report, site_profile, workload_types)
@@ -292,6 +292,19 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
             request = urlsplit(self.path)
             path = request.path.rstrip("/") or "/"
             query = parse_qs(request.query)
+            if path == "/national-grid":
+                try:
+                    target = national_grid.ensure_running()
+                except Exception as exc:
+                    self._send(_error_page(str(exc)).encode("utf-8"), 503,
+                               "text/html; charset=utf-8")
+                    return
+                self.send_response(302)
+                self.send_header("Location", target)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if path == "/api/v1/health":
                 self._send_json({
                     "status": "ok",
