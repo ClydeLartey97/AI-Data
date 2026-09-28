@@ -133,6 +133,36 @@ def get_decision(decision_id: str, path: Path | None = None) -> dict[str, Any] |
     }
 
 
+def _schedule_summary(row, request: dict[str, Any], response: dict[str, Any]
+                      ) -> dict[str, Any]:
+    """Summarise a saved multi-job schedule in the same columns as a plan."""
+    assignments = response.get("assignments") or []
+    starts = [item["start"] for item in assignments if item.get("start")]
+    finishes = [item["finish"] for item in assignments if item.get("finish")]
+    hardware = sorted({str(item.get("hardware")) for item in assignments
+                       if item.get("hardware")})
+    jobs = len(request.get("jobs") or [])
+    return {
+        "kind": "schedule",
+        "id": row["id"],
+        "created_at": row["created_at"],
+        "market": row["market"],
+        "location": row["location"],
+        "signal_mode": row["signal_mode"],
+        "status": "scored" if row["scored_at"] else "awaiting_outturn",
+        "scored_at": row["scored_at"],
+        "model_key": f"Schedule · {jobs} job{'s' if jobs != 1 else ''}",
+        "task": "schedule",
+        "hardware": ", ".join(hardware) or None,
+        "start": min(starts) if starts else None,
+        "finish": max(finishes) if finishes else None,
+        "cost": response.get("total_cost"),
+        "currency": (response.get("market") or {}).get("currency"),
+        "carbon_kg": response.get("total_carbon_kg"),
+        "pareto": None,
+    }
+
+
 def list_decisions(limit: int = 50, path: Path | None = None) -> list[dict[str, Any]]:
     limit = min(200, max(1, int(limit)))
     with closing(connect(path)) as connection:
@@ -148,9 +178,13 @@ def list_decisions(limit: int = 50, path: Path | None = None) -> list[dict[str, 
     for row in rows:
         request = json.loads(row["request_json"])
         response = json.loads(row["response_json"])
+        if "jobs" in request:
+            summaries.append(_schedule_summary(row, request, response))
+            continue
         workload = request.get("workload", {})
         selected = response.get("selected", {})
         summaries.append({
+            "kind": "plan",
             "id": row["id"],
             "created_at": row["created_at"],
             "market": row["market"],

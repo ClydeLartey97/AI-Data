@@ -662,6 +662,18 @@ function syncURL(){{
   var q=new URLSearchParams(location.search);
   Object.keys(S).forEach(function(k){{ if(k!=="site"||S[k]) q.set(k,String(S[k])); }});
   history.replaceState(null,"",location.pathname+"?"+q.toString());
+  carrySettings();
+}}
+
+function carrySettings(){{
+  var link=document.querySelector('.product-nav a[href^="/planner"]');
+  if(!link||S.model==="__custom__") return;
+  var url=new URL(link.getAttribute("href"),location.origin),
+    shared={{model:S.model,task:S.task,precision:S.prec,count:S.count,tokens:S.tokens,
+      shard:S.shard,statebytes:S.statebytes,headroom:S.headroom,context:S.context,
+      batch:S.batch,kvprecision:S.kvprec,pue:S.pue,system:S.system}};
+  Object.keys(shared).forEach(function(k){{ url.searchParams.set(k,String(shared[k])); }});
+  link.setAttribute("href",url.pathname+"?"+url.searchParams.toString());
 }}
 
 function goMarket(market,locationKey){{
@@ -740,7 +752,7 @@ document.querySelectorAll(".training-only").forEach(function(x){{x.classList.tog
 document.querySelectorAll(".inference-only").forEach(function(x){{x.classList.toggle("hide",S.task!=="inference");}});
 var marketSelect=document.getElementById("marketSelect"), gridLocation=document.getElementById("gridLocation");
 if(marketSelect) marketSelect.addEventListener("change",function(){{
-  var defaults={{GB:"national",CAISO:"sp15",NYISO:"nyc"}};
+  var defaults={{GB:"national",CAISO:"sp15",NYISO:"nyc",MISO:"indiana"}};
   goMarket(this.value,defaults[this.value]||"national");
 }});
 if(gridLocation) gridLocation.addEventListener("change",function(){{

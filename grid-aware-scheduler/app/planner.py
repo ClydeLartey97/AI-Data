@@ -296,7 +296,8 @@ S.pue=Math.min(3,Math.max(1,S.pue||1.2));S.system=Math.min(100,Math.max(1,S.syst
 S.context=Math.max(1,S.context||8192);S.batch=Math.max(1,S.batch||8);["costW","carbonW","delayW"].forEach(function(k){{S[k]=Math.min(100,Math.max(0,S[k]||0))}});
 S.maxCost=Math.max(0,S.maxCost||0);S.maxCarbon=Math.max(0,S.maxCarbon||0);S.maxDelay=Math.max(-1,Number.isFinite(S.maxDelay)?S.maxDelay:-1)}}
 function syncState(){{var q=new URLSearchParams(location.search);Object.keys(S).forEach(function(k){{q.set(k,String(S[k]))}});
-history.replaceState(null,"",location.pathname+"?"+q.toString())}}
+history.replaceState(null,"",location.pathname+"?"+q.toString());carrySettings()}}
+function carrySettings(){{var link=document.querySelector('.product-nav a[href^="/simulator"]');if(!link)return;var url=new URL(link.getAttribute("href"),location.origin),shared={{model:S.model,task:S.task,prec:S.precision,count:S.count,tokens:S.tokens,shard:S.shard,statebytes:S.statebytes,headroom:S.headroom,context:S.context,batch:S.batch,kvprec:S.kvprecision,pue:S.pue,system:S.system}};Object.keys(shared).forEach(function(k){{url.searchParams.set(k,String(shared[k]))}});link.setAttribute("href",url.pathname+"?"+url.searchParams.toString())}}
 function goMarket(market,locationKey){{var q=new URLSearchParams(location.search);q.set("market",market);q.set("location",locationKey);
 location.href=location.pathname+"?"+q.toString()}}
 function normal(v,lo,hi){{return hi<=lo?0:(v-lo)/(hi-lo)}}
@@ -410,7 +411,7 @@ loadState();validateState();["model","precision","count","tokens","deadline","sh
 document.querySelectorAll("[data-objective]").forEach(function(button){{button.addEventListener("click",function(){{var weights={{balanced:[50,50,0],cost:[100,0,0],carbon:[0,100,0],speed:[0,0,100]}}[button.dataset.objective];["costW","carbonW","delayW"].forEach(function(id,index){{S[id]=weights[index];document.getElementById(id).value=weights[index]}});renderPlan()}})}});
 document.querySelectorAll("#task button").forEach(function(b){{b.classList.toggle("on",b.dataset.task===S.task);b.addEventListener("click",function(){{S.task=b.dataset.task;document.querySelectorAll("#task button").forEach(x=>x.classList.toggle("on",x===b));document.querySelectorAll(".training-only").forEach(x=>x.classList.toggle("hide",S.task!=="training"));document.querySelectorAll(".inference-only").forEach(x=>x.classList.toggle("hide",S.task!=="inference"));renderPlan()}})}});
 document.querySelectorAll(".training-only").forEach(x=>x.classList.toggle("hide",S.task!=="training"));document.querySelectorAll(".inference-only").forEach(x=>x.classList.toggle("hide",S.task!=="inference"));
-document.getElementById("market").addEventListener("change",function(){{var defaults={{GB:"national",CAISO:"sp15",NYISO:"nyc"}};goMarket(this.value,defaults[this.value]||"national")}});
+document.getElementById("market").addEventListener("change",function(){{var defaults={{GB:"national",CAISO:"sp15",NYISO:"nyc",MISO:"indiana"}};goMarket(this.value,defaults[this.value]||"national")}});
 document.getElementById("location").addEventListener("change",function(){{goMarket("{current_market}",this.value)}});
 var loadNode=document.getElementById("loadNode");if(loadNode)loadNode.addEventListener("click",function(){{var n=document.getElementById("customNode").value.trim();if(n)goMarket("CAISO",n)}});
 renderPlan();

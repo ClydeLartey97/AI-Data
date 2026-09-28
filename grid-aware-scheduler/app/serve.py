@@ -78,6 +78,10 @@ def _apply_site_profile(payload: dict, context) -> dict | None:
     declared document wins by construction rather than by merge, so a stale
     browser field can never quietly override what the site declared — the
     same rule stored evidence profiles already follow.
+
+    Spending caps are scheduling policy rather than facts about the site, so
+    they travel separately in `limits` and are applied on top of the
+    declaration. Nothing physical can be overridden that way.
     """
     if not isinstance(payload, dict) or not payload.get("use_site_profile"):
         return None
@@ -95,6 +99,13 @@ def _apply_site_profile(payload: dict, context) -> dict | None:
     weather, warnings = site_profile.fetch_weather(profile, stamps)
     payload["facility"] = site_profile.to_facility_payload(
         profile, stamps, weather)
+    limits = payload.pop("limits", None) or {}
+    if not isinstance(limits, dict):
+        raise ValueError("limits must be an object")
+    unknown = set(limits) - {"max_total_cost", "max_total_carbon_kg"}
+    if unknown:
+        raise ValueError(f"unsupported limits: {', '.join(sorted(unknown))}")
+    payload["facility"].update(limits)
     envelope = payload["facility"].get("power_profile_kw") or []
     return {
         "site_id": profile.site["site_id"],
@@ -175,7 +186,7 @@ class _AsyncSiteCache:
 
 def _error_page(message: str) -> str:
     return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Grid Signal — error</title>
+<html lang="en"><head><meta charset="utf-8"><title>Market data unavailable · AI Energy</title>
 <style>
 :root {{ color-scheme: light dark; }}
 body {{ margin:0; min-height:100vh; display:grid; place-items:center;
@@ -194,6 +205,7 @@ code {{ font-size:13px; }}
 upstream availability, rate-limit, or location-identifier problem.</p>
 <p><code>{html.escape(message)}</code></p>
 <p>Reload once you're back online.</p>
+<p><a href="">Try again</a> · <a href="/">Open Overview for Great Britain</a></p>
 </div></body></html>"""
 
 
@@ -280,6 +292,15 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
 
         @staticmethod
         def _market_location(query: dict[str, list[str]]) -> tuple[str, str]:
+            if "market" not in query and "custom_node" not in query:
+                # The saved site is where the operator works, so a page opened
+                # without an explicit market starts there rather than in GB.
+                try:
+                    profile = site_profile.load(_site_profile_path())
+                except site_profile.ProfileError:
+                    profile = None
+                if profile is not None:
+                    return profile.market.upper(), profile.location
             market = query.get("market", ["GB"])[0].upper()
             default_location = {"CAISO": "sp15", "NYISO": "nyc", "MISO": "indiana"}.get(
                 market, "national"
@@ -667,12 +688,27 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                 market, location = self._market_location(query)
                 context = get_context(market, location, planning=True, span=2)
                 if is_portfolio:
+                    save = payload.pop("save_to_history", False)
+                    if not isinstance(save, bool):
+                        raise ValueError("save_to_history must be true or false")
                     notes = _apply_site_profile(payload, context)
                     response = api.portfolio_response(
                         payload, context, evidence_store.profile_map(),
                     )
                     if notes:
                         response["site_profile"] = notes
+                    if save:
+                        # Recomputed on the server from the same inputs, so
+                        # History holds the canonical schedule, not the
+                        # browser's copy of it.
+                        response["decision_id"] = audit_store.save_decision(
+                            market=context.market_key,
+                            location=context.location_name,
+                            signal_mode=context.signal_mode,
+                            request=payload,
+                            response=response,
+                            signals=context.series,
+                        )
                     self._send_json(response)
                     return
                 response = api.plan_response(payload, context, load_profiles())

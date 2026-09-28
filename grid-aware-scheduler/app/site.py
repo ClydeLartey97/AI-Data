@@ -8,6 +8,7 @@ is vague about it.
 """
 from __future__ import annotations
 
+from app.fleet import FLEET_CSS, FLEET_HTML, FLEET_JS
 from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS, product_nav
 
 _PAGE = """<!doctype html>
@@ -17,7 +18,7 @@ _PAGE = """<!doctype html>
 <style>
 :root{color-scheme:light dark;--bg:#f5f5f7;--card:#fff;--text:#111114;--muted:#65656b;
 --line:#dedee3;--blue:#0066d6;--green:#187a38;--amber:#9a5b00;--red:#c53030;
---text-2:var(--muted);--sep:var(--line);--shadow:0 1px 3px rgba(0,0,0,.08);
+--text-2:var(--muted);--sep:var(--line);--text-3:#a4a4aa;--orange:#b35300;--shadow:0 1px 3px rgba(0,0,0,.08);
 font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Helvetica,Arial,sans-serif}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-size:14px}
 header{height:58px;padding:0 max(22px,calc((100% - 1280px)/2));display:flex;align-items:center;
@@ -55,6 +56,7 @@ border-bottom:1px solid var(--line)}.summary div:last-child{border-bottom:0}
 @media(max-width:900px){.split{grid-template-columns:1fr}}
 @media(max-width:700px){header{height:auto;padding:12px 58px 12px 16px;align-items:flex-start;gap:8px;
 flex-direction:column}body>.theme-control~header{padding-right:58px}main{padding-top:24px}}
+__FLEET_CSS__
 __THEME_CSS__
 </style></head>
 <body>__THEME_CONTROL__
@@ -113,6 +115,7 @@ __THEME_CSS__
 <p class="warn" id="warnings" hidden></p>
 </aside>
 </div>
+__FLEET_HTML__
 </main>
 <script>
 (function(){"use strict";
@@ -252,13 +255,18 @@ document.getElementById("preview").addEventListener("click",preview);
 document.getElementById("reload").addEventListener("click",load);
 addPlant({name:"Rooftop array",kind:"solar",capacity_kw:1800,latitude:51.509,longitude:-0.13});
 load();})();
-</script></body></html>"""
+</script><script>__FLEET_JS__</script></body></html>"""
 
 
 def render() -> str:
     """Return the self-contained declaration page."""
     page = _PAGE.replace("__THEME_BOOTSTRAP__", THEME_BOOTSTRAP)
     page = page.replace("__THEME_CSS__", THEME_CSS)
+    for token, value in (("__FLEET_CSS__", FLEET_CSS), ("__FLEET_HTML__", FLEET_HTML),
+                         ("__FLEET_JS__", FLEET_JS)):
+        if token not in page:
+            raise AssertionError(f"{token} anchor missing from site page")
+        page = page.replace(token, value)
     page = page.replace("__PRODUCT_NAV__", product_nav("site"))
     if "__THEME_CONTROL__" not in page:
         raise AssertionError("theme control anchor missing from site page")

@@ -189,6 +189,70 @@ def test_portfolio_endpoint_uses_selected_market_context(local_server):
     assert response["assignments"][0]["job_id"] == "batch-1"
 
 
+def _small_schedule(save: object = None) -> dict:
+    payload = {
+        "facility": {"max_power_kw": 1},
+        "jobs": [{
+            "job_id": "batch-1", "deadline_hours": 2, "work_amount": 100,
+            "work_unit": "tokens", "utility": 1, "minimum_quality": 0.8,
+            "variants": [{
+                "candidate_key": "batch-1-m2", "hardware": "Apple M2 GPU",
+                "runtime_hours": 0.5, "it_power_kw": 1, "pue": 1,
+                "quality_score": 0.9, "quality_provenance": "MEASURED",
+                "evaluation_suite": "operator-eval", "evaluation_version": "1.0",
+                "hardware_provenance": "MEASURED",
+            }],
+        }],
+    }
+    if save is not None:
+        payload["save_to_history"] = save
+    return payload
+
+
+def test_a_schedule_is_only_saved_when_asked(local_server):
+    url = f"{local_server}/api/v1/portfolio?market=GB&location=london"
+    _, unsaved = _json(_post(url, _small_schedule()))
+    assert "decision_id" not in unsaved
+    _, listed = _json(f"{local_server}/api/v1/decisions")
+    assert listed["decisions"] == []
+
+
+def test_a_saved_schedule_appears_in_history_as_one_record(local_server):
+    """History lists a multi-job schedule in the same columns as a plan."""
+    url = f"{local_server}/api/v1/portfolio?market=GB&location=london"
+    _, saved = _json(_post(url, _small_schedule(True)))
+    decision_id = saved["decision_id"]
+    _, listed = _json(f"{local_server}/api/v1/decisions")
+    record = next(item for item in listed["decisions"] if item["id"] == decision_id)
+    assert record["kind"] == "schedule"
+    assert record["model_key"] == "Schedule · 1 job"
+    assert record["hardware"] == "Apple M2 GPU"
+    assert record["cost"] == saved["total_cost"]
+    assert record["carbon_kg"] == saved["total_carbon_kg"]
+    _, stored = _json(f"{local_server}/api/v1/decisions/{decision_id}")
+    assert "save_to_history" not in stored["decision"]["request"]
+
+
+def test_a_saved_schedule_is_refused_for_scoring_with_a_plain_reason(local_server):
+    url = f"{local_server}/api/v1/portfolio?market=GB&location=london"
+    _, saved = _json(_post(url, _small_schedule(True)))
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(_post(
+            f"{local_server}/api/v1/decisions/{saved['decision_id']}/score",
+            {"realised_points": [{"timestamp": "2026-08-01T00:00:00+00:00",
+                                  "price": 1, "carbon_intensity_g_per_kwh": 1}]}),
+            timeout=10)
+    assert caught.value.code == 400
+    assert "cannot be scored" in caught.value.read().decode()
+
+
+def test_save_to_history_must_be_a_boolean(local_server):
+    url = f"{local_server}/api/v1/portfolio?market=GB&location=london"
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(_post(url, _small_schedule("yes")), timeout=10)
+    assert caught.value.code == 400
+
+
 def test_workload_queue_page_is_linked_to_portfolio_api(local_server):
     with urllib.request.urlopen(
         f"{local_server}/workloads?market=GB&location=london", timeout=10
@@ -591,6 +655,59 @@ def test_a_typed_facility_cannot_silently_override_the_declared_site(
         }), timeout=10)
     assert caught.value.code == 400
     assert "not both" in caught.value.read().decode()
+
+
+def _declared_site_job() -> dict:
+    return {
+        "job_id": "train", "earliest_delay_hours": 0,
+        "deadline_hours": 6, "work_amount": 256, "work_unit": "tokens",
+        "workload_class": "language_generation", "run_mode": "inference",
+        "utility": 1, "minimum_quality": 0.8, "mandatory": True,
+        "variants": [{
+            "candidate_key": "train-gpu", "hardware": "Apple M2 GPU",
+            "model_id": "reference-language-model", "model_version": "1.0",
+            "precision": "int4", "compute_unit": "gpu",
+            "memory_required_gb": 2, "memory_available_gb": 8,
+            "runtime_hours": 0.5, "it_power_kw": 2, "pue": 1,
+            "quality_score": 0.9, "quality_provenance": "MEASURED",
+            "evaluation_suite": "operator-eval", "evaluation_version": "1.0",
+            "hardware_provenance": "MEASURED"}],
+    }
+
+
+def test_spending_caps_still_apply_to_a_declared_site(local_server,
+                                                      monkeypatch, tmp_path):
+    """The Overview sends its cost cap beside the declaration, not inside it.
+
+    The declared site's generation is free, so no cap can bite on cost here.
+    A negative cap is refused only by the scheduler's own facility checks,
+    which proves the cap reached them rather than being dropped with the form.
+    """
+    monkeypatch.setenv("SITE_PROFILE", str(tmp_path / "site-profile.json"))
+    _json(_post(f"{local_server}/api/v1/site-profile", _declaration()))
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(_post(f"{local_server}/api/v1/portfolio", {
+            "use_site_profile": True,
+            "limits": {"max_total_cost": -1},
+            "jobs": [_declared_site_job()],
+        }), timeout=10)
+    assert caught.value.code == 400
+    assert "max_total_cost" in caught.value.read().decode()
+
+
+def test_limits_cannot_override_physical_site_facts(local_server, monkeypatch,
+                                                    tmp_path):
+    """Only spending caps travel in `limits`; capacity stays declared."""
+    monkeypatch.setenv("SITE_PROFILE", str(tmp_path / "site-profile.json"))
+    _json(_post(f"{local_server}/api/v1/site-profile", _declaration()))
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(_post(f"{local_server}/api/v1/portfolio", {
+            "use_site_profile": True,
+            "limits": {"max_power_kw": 9999},
+            "jobs": [_declared_site_job()],
+        }), timeout=10)
+    assert caught.value.code == 400
+    assert "unsupported limits" in caught.value.read().decode()
 
 
 def test_workload_types_endpoint_serves_the_selector_contract(local_server):

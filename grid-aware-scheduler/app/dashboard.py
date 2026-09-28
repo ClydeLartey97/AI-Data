@@ -717,7 +717,7 @@ svg [hidden] {{ display: none; }}
 
 var marketSelect = document.getElementById("marketSelect");
 if (marketSelect) marketSelect.addEventListener("change", function () {{
-  var defaults = {{GB:"national",CAISO:"sp15",NYISO:"nyc"}};
+  var defaults = {{GB:"national",CAISO:"sp15",NYISO:"nyc",MISO:"indiana"}};
   var defaultLocation = defaults[marketSelect.value] || "national";
   location.href = "/grid?market=" + encodeURIComponent(marketSelect.value) +
     "&location=" + encodeURIComponent(defaultLocation);

@@ -43,7 +43,7 @@ All from live data, not simulation:
 python -m app.serve      # → http://localhost:8765, loopback only
 ```
 
-191 tests pass offline with no network access. See [`grid-aware-scheduler/docs/`](grid-aware-scheduler/docs/) for the exact planning equations, data contracts, calibration rules and the discovery boundary.
+587 tests run offline with no network access. See [`grid-aware-scheduler/docs/`](grid-aware-scheduler/docs/) for the exact planning equations, data contracts, calibration rules and the discovery boundary.
 
 ## Working on this
 

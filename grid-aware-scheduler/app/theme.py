@@ -61,6 +61,9 @@ box-shadow:0 1px 3px rgba(0,0,0,.10)!important}
 .product-name{display:block;margin:0 0 5px;color:var(--blue,var(--price));font-size:11px;
 font-weight:750;letter-spacing:.1em;text-transform:uppercase}
 @media(max-width:620px){.product-nav{width:100%}.product-nav a{padding:7px 11px!important}}
+.page-loading{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:10003;padding:9px 14px;
+border:1px solid var(--sep);border-radius:10px;background:var(--card);color:var(--text);box-shadow:var(--shadow);
+font-size:13px}
 """
 
 
@@ -124,4 +127,10 @@ scrim.addEventListener("click",function(){set(false)});
 document.addEventListener("keydown",function(event){if(event.key==="Escape"&&menu.classList.contains("open")){set(false);button.focus()}});
 document.getElementById("nationalGridLink").addEventListener("click",function(){
 document.getElementById("nationalGridNote").hidden=false});})();
+</script>
+<div class="page-loading" id="pageLoading" role="status" hidden>Loading. Market data can take up to 30 seconds.</div>
+<script>
+(function(){var notice=document.getElementById("pageLoading");if(!notice)return;
+window.addEventListener("beforeunload",function(){notice.hidden=false});
+window.addEventListener("pageshow",function(){notice.hidden=true});})();
 </script>"""

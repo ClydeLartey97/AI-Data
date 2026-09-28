@@ -155,21 +155,28 @@ overstates it by 11%.
 
 ## The product
 
-Five linked local operator surfaces, plus a versioned JSON API:
+Six local pages, one per task, plus a versioned JSON API:
 
-- **`/`** — AI datacentre operations. Workload demand, quality and evidence
-  state, SLA and memory readiness, facility capacity, and an exact queue
-  recommendation. Models solar, wind, hydro, nuclear, geothermal, biomass and
-  thermal generation, time-varying PUE, base demand and storage, with declared
-  site coordinates and delivery losses.
-- **`/simulator`** — Fleet Lab. Runtime, memory, energy, cost and carbon
-  across the hardware catalogue.
-- **`/planner`** — Placement Lab. Searches every feasible hardware and
-  half-hour placement against explicit cost, carbon and delay weights.
-- **`/grid`** — Sites & Grid terminal. Regional price, carbon and interactive
-  market analytics.
-- **`/decisions`** — the immutable decision journal, with forecast-versus-
-  realised evidence and exact JSON export.
+- **Overview** (`/`) — your site at a glance, the recommended schedule, and
+  your jobs as one row each. Edit a row to change its stage, runtime, power,
+  deadline or whether it must run; everything else sits under Advanced. A job
+  that cannot run as set says why on its own row. Build schedule runs the
+  exact optimiser; Save to History stores the server's own result.
+- **Plan work** (`/planner`) — one job, every option: searches each feasible
+  hardware and half-hour placement against cost, carbon and delay, and saves
+  an audited decision.
+- **Hardware** (`/simulator`) — runtime, memory, energy, cost and carbon for a
+  model across the hardware catalogue. Its model settings carry over to and
+  from Plan work.
+- **Energy** (`/grid`) — price and carbon for any market and location, with
+  interactive charts.
+- **Site setup** (`/site`) — declared once: location, market, facility, on-site
+  generation, and your hardware (what is connected, live readings, discovery
+  and measured workload profiles). Once saved, every page opens on this site's
+  market, and the Overview schedules against it. Until then it uses an
+  example site and says so.
+- **History** (`/decisions`) — every saved schedule and plan, unchanged after
+  saving, with forecast-versus-realised evidence for plans and JSON export.
 
 Everything is local. Nothing is hosted, and the server binds to loopback only.
 
@@ -201,8 +208,8 @@ drives carbon and weather only — never presented as though it varied price.
 adapters/   five market boundaries, weather, and per-plant availability
 core/       market-agnostic: exact planning, energy dispatch, audit, backtest
 hardware/   catalogue, measurement, roofline prediction, cross-part scaling
-app/        five operator surfaces, charts, JSON API, loopback server
-tests/      478 offline algorithm, page, persistence and HTTP contract tests
+app/        six operator pages, charts, JSON API, loopback server
+tests/      587 offline algorithm, page, persistence and HTTP contract tests
 ```
 
 Deeper documentation lives in [`docs/`](docs/): the exact planner equations and

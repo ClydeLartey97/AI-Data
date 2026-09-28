@@ -1282,6 +1282,10 @@ def score_response(decision: dict[str, Any], payload: dict[str, Any]
     realised = sorted((point(row) for row in rows), key=lambda item: item.timestamp)
     forecast = [point(row, stored=True) for row in decision.get("signals", [])]
     request_payload = decision.get("request", {})
+    if isinstance(request_payload, dict) and "jobs" in request_payload:
+        raise ValueError(
+            "saved schedules cannot be scored yet; only single plans from "
+            "Plan work can be scored against realised outturn")
     try:
         workload = WorkloadSpec(**request_payload["workload"])
         planning = PlanningRequest(**request_payload["planning"])

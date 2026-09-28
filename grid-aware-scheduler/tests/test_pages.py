@@ -158,25 +158,26 @@ def test_workload_queue_javascript_parses():
         "Gas", "Coal", "Oil", "Battery capacity", "Renewable match",
         "data-inspector", "Click to expand", "Exact physical facility",
         "Origin latitude", "Origin longitude", "Delivery loss", "Connection ID",
-        "Price: GB national", "Carbon: GB national", "30 / 30 min",
-        "Governed evidence profile", "Measured workload profiles",
-        "Compare every compatible governed profile",
-        "/api/v1/evidence/profiles", "/api/v1/evidence/probe",
-        "Immutable observations", "Runner ready", "Verify local MLX",
+        "Governed evidence profile", "Compare every compatible governed profile",
+        "/api/v1/evidence/profiles", "Spending caps", "See hardware",
     ):
         assert token in html
     assert "__MARKET" not in html
 
 
-def test_operations_accepts_an_exact_caiso_pricing_node():
+def test_overview_takes_its_market_from_the_site_not_its_own_picker():
+    """Market, location and hardware each have one home: Site setup.
+
+    The Overview used to carry its own market picker, CAISO node field and
+    hardware sections, so the same choice could be made in two places.
+    """
     from app.workloads import render
     html = render(_market_context("CAISO"))
-    assert "Custom CAISO pricing node" in html
-    assert 'id="customNode"' in html
-    assert 'id="loadNode"' in html
-    assert "Price: Pricing node" in html
-    assert "Carbon: CAISO balancing area" in html
-    assert "30 / 60 min" in html
+    for gone in ('id="market"', 'id="location"', 'id="customNode"',
+                 'id="inventoryCard"', 'id="evidenceRegistry"'):
+        assert gone not in html
+    for token in ("/site#hardware", "Change site", "Spending caps", 'id="siteStripName"'):
+        assert token in html
 
 
 # --- structural checks that need no browser ------------------------------
@@ -400,6 +401,11 @@ def test_site_declaration_page_renders_with_no_leftover_tokens():
     assert "__THEME" not in page
     assert "facility-energy-v1" in page
     assert 'id="plants"' in page
+    for token in ('id="hardware"', "Connected hardware", "Measured workload profiles",
+                  "/api/v1/scan", "/api/v1/evidence/probe", "Immutable observations",
+                  "Runner ready", "Verify local MLX"):
+        assert token in page
+    assert "__FLEET" not in page
 
 
 def test_every_page_reserves_space_for_the_appearance_control():
