@@ -16,10 +16,10 @@ It is **market-agnostic** by construction: the scheduling logic never touches ma
 
 #### What is built
 
-- **Four market adapters**, all against official public sources: GB (national price, 18 regional carbon zones), CAISO (nodal LMP), NYISO (11 zonal LBMP), MISO (8 hub LMP). US carbon comes from EIA-930 and is labelled balancing-area scope — never presented as nodal.
+- **Five market adapters**, all against official public sources and none needing an API key: GB (national price, 18 regional carbon zones), CAISO (nodal LMP), NYISO (11 zonal LBMP), MISO (8 hub LMP), ERCOT (hub and load-zone day-ahead settlement point prices). US carbon comes from EIA-930 and is labelled balancing-area scope — never presented as nodal. GB reads through a sibling data project that must be checked out beside this one; the four US markets need nothing else.
 - **An exact placement engine.** It enumerates every feasible hardware/location/start combination under hard memory, deadline, capacity, cost and carbon constraints, applies PUE, and marks the cost/carbon Pareto frontier. No solver, no opaque model — the decision is auditable and runs in microseconds.
 - **A multi-job portfolio scheduler** with workflow stage dependencies, checkpoint splitting and facility power limits.
-- **A local operator product** — five linked pages plus a versioned JSON API, served by a local process bound to loopback. Every planning decision can be persisted with its complete decision-time signal snapshot and later scored against realised outturn.
+- **A local operator product** — six linked pages plus a versioned JSON API, served by a local process bound to loopback. Every planning decision can be persisted with its complete decision-time signal snapshot and later scored against realised outturn.
 - **Read-only hardware discovery.** Single-host detection, plus facility-scale Redfish inventory of operator-declared endpoints. Provenance is per field: discovery can prove identity, installed memory and an instantaneous power reading; it never promotes throughput, which requires repeated calibration runs.
 
 #### Measured results
@@ -30,6 +30,10 @@ All from live data, not simulation:
 - **Across 392 days:** a 4-hour job saves a median 21.9% on cost at a 24-hour deadline, and 75% at a week. Over a full year GB price ranged £0.09–£560.81/MWh.
 - **Location beats timing for carbon.** North Scotland at 0 gCO₂/kWh against South West England at 358, the same instant.
 - **Cheap is not clean.** Price/carbon correlation is r = 0.54, and the cheapest decile is also the cleanest only 59% of the time — so the objective has to be stated, not inferred.
+
+From a published production trace:
+
+- **Long jobs hold almost all the GPU time.** In Microsoft's Philly DNN training trace (CC BY 4.0; Jeon et al., USENIX ATC 2019), 83,152 of the 117,325 recorded jobs completed with usable timestamps and GPU counts. Of those, 2,896 (3.5%) ran longer than 24 hours and held **90.9% of the 2,484,862 GPU-hours** — measured as runtime × GPUs per job, by `gpu_hour_concentration` in `core/trace_replay.py`. A job longer than its deadline has no window to move into, which is why time-shifting saves single-digit percentages on real training work and placement and location matter more.
 
 #### What this is not
 
@@ -43,7 +47,7 @@ All from live data, not simulation:
 python -m app.serve      # → http://localhost:8765, loopback only
 ```
 
-587 tests run offline with no network access. See [`grid-aware-scheduler/docs/`](grid-aware-scheduler/docs/) for the exact planning equations, data contracts, calibration rules and the discovery boundary.
+592 tests run offline with no network access. See [`grid-aware-scheduler/docs/`](grid-aware-scheduler/docs/) for the exact planning equations, data contracts, calibration rules and the discovery boundary.
 
 ## Working on this
 

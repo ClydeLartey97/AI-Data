@@ -76,18 +76,24 @@ inferred.**
 
 ### The honest ceiling, on a real production trace
 
-Replaying **83,152 real GPU training jobs** (Microsoft's Philly trace, 2.48
-million GPU-hours) against real GB market data gives **0.45% cost and 0.51%
-carbon saved** when each job may move only inside the queueing delay its own
-cluster already spent — so nothing finishes later than it actually did.
-Declaring a 24-hour deadline nobody declared in 2017 raises it to 6.88%.
+Microsoft's Philly trace records 117,325 GPU training jobs; **83,152**
+completed with usable timestamps and GPU counts (2.48 million GPU-hours).
+Replaying the **78,975** of them that fitted a 120-day window of real GB market
+data (run on 16 August 2026) gave **0.45% cost and 0.51% carbon saved** when
+each job may move only inside the queueing delay its own cluster already
+spent — so nothing finishes later than it actually did. Declaring a 24-hour
+deadline nobody declared in 2017 raises it to 6.88%. The replayed count and
+the saving depend on how complete the market window is: a re-run on 28
+September against a cache with gaps replayed 58,493 jobs for 0.34% and 0.27%.
 
 **Quote that figure, not the synthetic one.** The project's own early headline
 was 93.6% — one hand-picked job in one hand-picked window. Across a real
 workload the honest number is single digits.
 
 **Why**, and it redirected the whole product: **3.5% of jobs are longer than
-24 hours and consume 90.9% of all GPU-hours.** A job that runs longer than its
+24 hours and consume 90.9% of all GPU-hours** (2,896 of the 83,152 completed
+jobs; `gpu_hour_concentration` in `core/trace_replay.py`, which needs no
+market data and reproduces exactly). A job that runs longer than its
 deadline cannot be shifted at all. Time-shifting is structurally incapable of
 touching where the energy actually is — so placement and location do the heavy
 lifting, and the catalogue already shows a 20× energy spread for identical
@@ -98,6 +104,10 @@ work.
 An Apple M2 was measured across three preflight-validated runs: **2,583
 GFLOP/s** dense fp16 GEMM and **75.7 GB/s** streaming read, 0.3% spread. That
 is 89.7% of its published arithmetic peak and 75.7% of its published bus.
+The three raw runs are held in the local baseline store, which is not
+committed; the medians are recorded in `hardware/derive.py`. These are
+throughput ceilings, not workload profiles: the measured-workload store is
+still empty.
 
 Those two constants are enough to model any transformer, because its two
 phases are each bounded by one of them — decode by bandwidth, prefill by
@@ -209,7 +219,7 @@ adapters/   five market boundaries, weather, and per-plant availability
 core/       market-agnostic: exact planning, energy dispatch, audit, backtest
 hardware/   catalogue, measurement, roofline prediction, cross-part scaling
 app/        six operator pages, charts, JSON API, loopback server
-tests/      587 offline algorithm, page, persistence and HTTP contract tests
+tests/      592 offline algorithm, page, persistence and HTTP contract tests
 ```
 
 Deeper documentation lives in [`docs/`](docs/): the exact planner equations and
