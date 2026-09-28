@@ -75,7 +75,7 @@ __THEME_CSS__
 <label>Longitude<input id="siteLon" type="number" step="0.0001" value="-0.1278"></label>
 <label>Meter or connection ID<input id="siteMeter" placeholder="optional"></label>
 <label>Time zone<input id="siteTz" value="Europe/London"></label>
-<label>Market<select id="market"><option value="GB">GB</option><option value="CAISO">CAISO</option><option value="NYISO">NYISO</option><option value="MISO">MISO</option></select></label>
+<label>Market<select id="market"><option value="GB">GB</option><option value="CAISO">CAISO</option><option value="NYISO">NYISO</option><option value="MISO">MISO</option><option value="ERCOT">ERCOT</option></select></label>
 <label>Price / carbon location<input id="location" value="national"></label>
 <label>Declared by<input id="declaredBy" value="Site engineering"></label>
 </div></section>

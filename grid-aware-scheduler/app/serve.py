@@ -302,7 +302,7 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                 if profile is not None:
                     return profile.market.upper(), profile.location
             market = query.get("market", ["GB"])[0].upper()
-            default_location = {"CAISO": "sp15", "NYISO": "nyc", "MISO": "indiana"}.get(
+            default_location = {"CAISO": "sp15", "NYISO": "nyc", "MISO": "indiana", "ERCOT": "houston"}.get(
                 market, "national"
             )
             custom_node = query.get("custom_node", [""])[0].strip()
@@ -681,7 +681,7 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                 query = parse_qs(request.query)
                 if isinstance(payload, dict):
                     query.setdefault("market", [str(payload.get("market", "GB"))])
-                    default = {"CAISO": "sp15", "NYISO": "nyc", "MISO": "indiana"}.get(
+                    default = {"CAISO": "sp15", "NYISO": "nyc", "MISO": "indiana", "ERCOT": "houston"}.get(
                         str(payload.get("market", "GB")).upper(), "national"
                     )
                     query.setdefault("location", [str(payload.get("location", default))])

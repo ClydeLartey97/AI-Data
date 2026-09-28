@@ -185,7 +185,7 @@ font-size:11px;font-weight:500}}.advanced-controls>.controls{{margin-top:14px}}
     <option value="GB"{" selected" if context.market_key == "GB" else ""}>Great Britain</option>
     <optgroup label="United States">
       <option value="CAISO"{" selected" if context.market_key == "CAISO" else ""}>California ISO</option>
-      <option value="NYISO"{" selected" if context.market_key == "NYISO" else ""}>New York ISO</option><option value="MISO"{" selected" if context.market_key == "MISO" else ""}>Midcontinent ISO</option>
+      <option value="NYISO"{" selected" if context.market_key == "NYISO" else ""}>New York ISO</option><option value="MISO"{" selected" if context.market_key == "MISO" else ""}>Midcontinent ISO</option><option value="ERCOT"{" selected" if context.market_key == "ERCOT" else ""}>ERCOT (Texas)</option>
     </optgroup>
   </select></div>
   <div class="ctl"><label for="location">Grid location</label><select id="location">{_options(context)}</select></div>
@@ -411,7 +411,7 @@ loadState();validateState();["model","precision","count","tokens","deadline","sh
 document.querySelectorAll("[data-objective]").forEach(function(button){{button.addEventListener("click",function(){{var weights={{balanced:[50,50,0],cost:[100,0,0],carbon:[0,100,0],speed:[0,0,100]}}[button.dataset.objective];["costW","carbonW","delayW"].forEach(function(id,index){{S[id]=weights[index];document.getElementById(id).value=weights[index]}});renderPlan()}})}});
 document.querySelectorAll("#task button").forEach(function(b){{b.classList.toggle("on",b.dataset.task===S.task);b.addEventListener("click",function(){{S.task=b.dataset.task;document.querySelectorAll("#task button").forEach(x=>x.classList.toggle("on",x===b));document.querySelectorAll(".training-only").forEach(x=>x.classList.toggle("hide",S.task!=="training"));document.querySelectorAll(".inference-only").forEach(x=>x.classList.toggle("hide",S.task!=="inference"));renderPlan()}})}});
 document.querySelectorAll(".training-only").forEach(x=>x.classList.toggle("hide",S.task!=="training"));document.querySelectorAll(".inference-only").forEach(x=>x.classList.toggle("hide",S.task!=="inference"));
-document.getElementById("market").addEventListener("change",function(){{var defaults={{GB:"national",CAISO:"sp15",NYISO:"nyc",MISO:"indiana"}};goMarket(this.value,defaults[this.value]||"national")}});
+document.getElementById("market").addEventListener("change",function(){{var defaults={{GB:"national",CAISO:"sp15",NYISO:"nyc",MISO:"indiana",ERCOT:"houston"}};goMarket(this.value,defaults[this.value]||"national")}});
 document.getElementById("location").addEventListener("change",function(){{goMarket("{current_market}",this.value)}});
 var loadNode=document.getElementById("loadNode");if(loadNode)loadNode.addEventListener("click",function(){{var n=document.getElementById("customNode").value.trim();if(n)goMarket("CAISO",n)}});
 renderPlan();

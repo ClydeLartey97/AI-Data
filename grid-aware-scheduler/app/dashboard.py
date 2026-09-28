@@ -201,7 +201,7 @@ def _market_controls(context: "MarketContext | None") -> str:
     <option value="GB"{" selected" if context.market_key == "GB" else ""}>Great Britain</option>
     <optgroup label="United States">
       <option value="CAISO"{" selected" if context.market_key == "CAISO" else ""}>California ISO</option>
-      <option value="NYISO"{" selected" if context.market_key == "NYISO" else ""}>New York ISO</option><option value="MISO"{" selected" if context.market_key == "MISO" else ""}>Midcontinent ISO</option>
+      <option value="NYISO"{" selected" if context.market_key == "NYISO" else ""}>New York ISO</option><option value="MISO"{" selected" if context.market_key == "MISO" else ""}>Midcontinent ISO</option><option value="ERCOT"{" selected" if context.market_key == "ERCOT" else ""}>ERCOT (Texas)</option>
     </optgroup>
   </select></label>
   <label>Grid location <select name="location">{options}</select></label>
@@ -717,7 +717,7 @@ svg [hidden] {{ display: none; }}
 
 var marketSelect = document.getElementById("marketSelect");
 if (marketSelect) marketSelect.addEventListener("change", function () {{
-  var defaults = {{GB:"national",CAISO:"sp15",NYISO:"nyc",MISO:"indiana"}};
+  var defaults = {{GB:"national",CAISO:"sp15",NYISO:"nyc",MISO:"indiana",ERCOT:"houston"}};
   var defaultLocation = defaults[marketSelect.value] || "national";
   location.href = "/grid?market=" + encodeURIComponent(marketSelect.value) +
     "&location=" + encodeURIComponent(defaultLocation);

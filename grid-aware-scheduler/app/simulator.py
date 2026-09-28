@@ -197,7 +197,7 @@ def render(devices: dict, models: dict, grid: dict, sites: dict,
       <option value="GB"{" selected" if market_key == "GB" else ""}>Great Britain</option>
       <optgroup label="United States">
         <option value="CAISO"{" selected" if market_key == "CAISO" else ""}>California ISO</option>
-        <option value="NYISO"{" selected" if market_key == "NYISO" else ""}>New York ISO</option><option value="MISO"{" selected" if market_key == "MISO" else ""}>Midcontinent ISO</option>
+        <option value="NYISO"{" selected" if market_key == "NYISO" else ""}>New York ISO</option><option value="MISO"{" selected" if market_key == "MISO" else ""}>Midcontinent ISO</option><option value="ERCOT"{" selected" if market_key == "ERCOT" else ""}>ERCOT (Texas)</option>
       </optgroup>
     </select></div>
     <div class="ctl"><label for="gridLocation">Grid location</label>
@@ -752,7 +752,7 @@ document.querySelectorAll(".training-only").forEach(function(x){{x.classList.tog
 document.querySelectorAll(".inference-only").forEach(function(x){{x.classList.toggle("hide",S.task!=="inference");}});
 var marketSelect=document.getElementById("marketSelect"), gridLocation=document.getElementById("gridLocation");
 if(marketSelect) marketSelect.addEventListener("change",function(){{
-  var defaults={{GB:"national",CAISO:"sp15",NYISO:"nyc",MISO:"indiana"}};
+  var defaults={{GB:"national",CAISO:"sp15",NYISO:"nyc",MISO:"indiana",ERCOT:"houston"}};
   goMarket(this.value,defaults[this.value]||"national");
 }});
 if(gridLocation) gridLocation.addEventListener("change",function(){{

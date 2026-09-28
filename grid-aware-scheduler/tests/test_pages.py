@@ -395,6 +395,30 @@ def test_candles_are_not_flat_at_native_resolution():
     assert 'data-iv="21600"' in html
 
 
+def test_every_page_offers_every_market_the_loader_supports():
+    """Five adapters sit behind `load_market`; a market only a URL can reach
+    is not integrated. ERCOT was loadable but missing from every picker."""
+    from app import site
+    from app.dashboard import render as render_dashboard
+    from app.planner import render as render_planner
+    from app.simulator import device_specs, model_specs, render as render_simulator
+    pages = {
+        "energy": render_dashboard(_fake_series(), Job("t", 6.5, 8, 48), "GB", "GBP",
+                                   context=_market_context()),
+        "plan": render_planner(_market_context()),
+        "hardware": render_simulator(device_specs(), model_specs(), {
+            "ok": False, "market_key": "GB", "location_key": "national",
+            "locations": [{"key": "national", "name": "GB", "detail": "national"}],
+        }, {}),
+        "site": site.render(),
+    }
+    for name, page in pages.items():
+        for market in ("GB", "CAISO", "NYISO", "MISO", "ERCOT"):
+            assert f'<option value="{market}"' in page, (name, market)
+    for name in ("energy", "plan", "hardware"):
+        assert 'ERCOT:"houston"' in pages[name].replace(" ", ""), name
+
+
 def test_site_declaration_page_renders_with_no_leftover_tokens():
     from app import site
     page = site.render()

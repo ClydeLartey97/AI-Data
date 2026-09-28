@@ -253,6 +253,22 @@ def test_save_to_history_must_be_a_boolean(local_server):
     assert caught.value.code == 400
 
 
+def test_a_market_named_without_a_location_opens_at_its_default(local_server,
+                                                                  monkeypatch):
+    """Every market needs a default location, or naming it alone breaks the
+    page — which is how MISO, then ERCOT, came to be unreachable by picker."""
+    seen = []
+    monkeypatch.setattr(serve, "load_market",
+                        lambda market, location, **kwargs:
+                        seen.append((market, location)) or _context())
+    for market, location in (("ERCOT", "houston"), ("MISO", "indiana"),
+                             ("NYISO", "nyc"), ("CAISO", "sp15")):
+        with urllib.request.urlopen(f"{local_server}/grid?market={market}",
+                                    timeout=10) as response:
+            assert response.status == 200
+        assert seen[-1] == (market, location)
+
+
 def test_workload_queue_page_is_linked_to_portfolio_api(local_server):
     with urllib.request.urlopen(
         f"{local_server}/workloads?market=GB&location=london", timeout=10
