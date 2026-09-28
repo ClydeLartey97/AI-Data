@@ -197,3 +197,34 @@ def test_an_unknown_policy_is_refused(tmp_path):
     with pytest.raises(ValueError, match="policy must be"):
         trace_replay.replay(trace_replay.load_jobs(path), _series(),
                             policy="optimistic")
+
+
+# --- where the GPU time is ------------------------------------------------
+
+def _job(job_id, runtime_hours, gpus=1):
+    start = datetime(2017, 10, 7, tzinfo=timezone.utc)
+    return trace_replay.TraceJob(job_id, start, start, runtime_hours, gpus)
+
+
+def test_gpu_hours_concentrate_in_jobs_longer_than_the_deadline():
+    """One 30-hour job against three 1-hour jobs: a quarter of the jobs,
+    30 of 33 GPU-hours. The same shape, at scale, is the Philly finding."""
+    jobs = [_job("long", 30), _job("a", 1), _job("b", 1), _job("c", 1)]
+    share = trace_replay.gpu_hour_concentration(jobs, 24)
+    assert share["long_jobs"] == 1
+    assert share["long_job_percent"] == 25.0
+    assert share["gpu_hours"] == 33.0
+    assert share["long_gpu_hour_percent"] == 90.91
+
+
+def test_concentration_weights_by_gpus_and_treats_the_threshold_as_shiftable():
+    jobs = [_job("exactly", 24, gpus=1), _job("wide", 25, gpus=8), _job("short", 2)]
+    share = trace_replay.gpu_hour_concentration(jobs, 24)
+    assert share["long_jobs"] == 1
+    assert share["long_gpu_hours"] == 200.0
+    assert share["long_gpu_hour_percent"] == round(100 * 200 / 226, 2)
+
+
+def test_concentration_refuses_an_empty_trace():
+    with pytest.raises(ValueError):
+        trace_replay.gpu_hour_concentration([], 24)

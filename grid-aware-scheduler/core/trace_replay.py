@@ -282,6 +282,35 @@ def replay(jobs: list[TraceJob], series: list[GridDataPoint], *,
     )
 
 
+def gpu_hour_concentration(jobs: list[TraceJob], threshold_hours: float = 24.0
+                           ) -> dict[str, float | int]:
+    """How much of the trace's GPU time sits in jobs longer than a deadline.
+
+    This is the number that explains why time-shifting saves so little on a
+    real training workload: a job that runs longer than the deadline it would
+    be given has no window to move into, and in the Philly trace those jobs
+    hold nearly all of the GPU-hours. It is a property of the trace alone and
+    needs no market data. "Longer than" is strict, so a job of exactly the
+    threshold is counted as shiftable.
+    """
+    if not jobs:
+        raise ValueError("concentration needs at least one job")
+    if not threshold_hours > 0:
+        raise ValueError("threshold_hours must be positive")
+    total = sum(job.gpu_hours for job in jobs)
+    long_jobs = [job for job in jobs if job.runtime_hours > threshold_hours]
+    long_hours = sum(job.gpu_hours for job in long_jobs)
+    return {
+        "threshold_hours": threshold_hours,
+        "jobs": len(jobs),
+        "long_jobs": len(long_jobs),
+        "long_job_percent": round(100 * len(long_jobs) / len(jobs), 2),
+        "gpu_hours": round(total, 1),
+        "long_gpu_hours": round(long_hours, 1),
+        "long_gpu_hour_percent": round(100 * long_hours / total, 2) if total else 0.0,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     from core import feed
 
@@ -304,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
                     declared_deadline_hours=args.deadline_hours,
                     watts_per_gpu=args.watts_per_gpu)
     payload = result.as_dict()
+    payload["concentration"] = gpu_hour_concentration(jobs, args.deadline_hours)
     if args.json:
         print(json.dumps(payload, indent=2))
         return 0
@@ -321,6 +351,10 @@ def main(argv: list[str] | None = None) -> int:
           f"{payload['jobs_with_no_slack']:,} had no slack to use")
     print(f"delay  median {payload['added_delay_hours']['median']} h, "
           f"max {payload['added_delay_hours']['max']} h")
+    share = payload["concentration"]
+    print(f"long   {share['long_job_percent']}% of jobs run longer than "
+          f"{share['threshold_hours']:g} h and hold "
+          f"{share['long_gpu_hour_percent']}% of GPU-hours")
     return 0
 
 
