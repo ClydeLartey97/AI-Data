@@ -52,3 +52,13 @@ python -m app.serve      # → http://localhost:8765, loopback only
 ## Working on this
 
 Start with [`grid-aware-scheduler/HANDOFF.md`](grid-aware-scheduler/HANDOFF.md). It is the single source of truth for project state, decisions made, prior art and what to do next — kept current at the end of every working session.
+
+---
+
+## Licence
+
+© 2026 Clyde Lartey. All rights reserved.
+
+This repository is public so the work can be read and evaluated. It is not open source: no part of it may be used, copied, modified or distributed without written permission. See [LICENSE](LICENSE).
+
+Third-party files keep their own licences: the vendored KLineCharts bundle (`grid-aware-scheduler/app/static/vendor/`, Apache-2.0) and the DMTF Redfish mockup fixtures (`grid-aware-scheduler/tests/fixtures/redfish/`, BSD-3-Clause). The Philly trace used by the replay is not included; it is published by Microsoft under CC BY 4.0.

@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Decides which accelerator runs which AI workload, where and when, against measured hardware and real electricity price and carbon signals."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "Proprietary. All rights reserved." }
 authors = [{ name = "Clyde Lartey" }]
 
 # Deliberately three. Everything else the product needs — the HTTP server,

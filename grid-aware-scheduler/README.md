@@ -244,3 +244,12 @@ does **not** generate carbon credits. It is advisory: it must not yet be
 trusted to launch or defer a customer's workload. See
 [`docs/commercial-readiness.md`](docs/commercial-readiness.md) for the exact
 boundary, and `HANDOFF.md` for the prior art it builds on.
+
+---
+
+## Licence
+
+© 2026 Clyde Lartey. All rights reserved. This code is published to be read
+and evaluated, not reused: see [LICENSE](../LICENSE).
+Third-party files keep their own licences: `app/static/vendor/` (KLineCharts,
+Apache-2.0) and `tests/fixtures/redfish/` (DMTF, BSD-3-Clause).

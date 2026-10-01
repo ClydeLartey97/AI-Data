@@ -1,0 +1,27 @@
+Copyright © 2026 Clyde Lartey. All rights reserved.
+
+This repository is published so that the work can be read and evaluated. It
+is not open source. No licence, express or implied, is granted to any person
+to use, copy, modify, merge, publish, distribute, sublicense or sell this
+software or its documentation, in whole or in part, without the prior written
+permission of the copyright holder.
+
+Viewing the repository, and forking it on GitHub where GitHub's Terms of
+Service allow, does not grant any of the rights above.
+
+To request permission or a commercial licence, contact the copyright holder
+through the GitHub account that hosts this repository.
+
+Third-party files remain under their own licences and are not covered by this
+notice:
+
+  - grid-aware-scheduler/app/static/vendor/klinecharts.min.js
+    KLineChart, Copyright (c) 2019 lihu, Apache License 2.0
+  - grid-aware-scheduler/tests/fixtures/redfish/
+    DMTF Redfish mockup data, Copyright DMTF, BSD-3-Clause
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE.

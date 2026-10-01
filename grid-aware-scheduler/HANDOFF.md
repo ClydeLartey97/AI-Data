@@ -1081,3 +1081,10 @@ Neither branch is wrong; they need different next steps and should not both be b
 - Docs: root README now lists five adapters and six pages, adds the trace concentration under Measured results (dataset, job count, what was measured, citation) and has the real test count. Scheduler README: replay counts corrected, concentration sourced, and the M2 paragraph now says the raw runs are local and uncommitted and that these are throughput ceilings, not workload profiles. Honesty sections unchanged.
 - Suite **585 passed, 7 skipped** here (592 collected); the skips are Node-dependent page parsers and MLX, both of which run or skip in CI as before.
 - Remains: backfill the GB cache on the M5; Compare (Plan work + Hardware merge, step 3); the M5 benchmark after a restart; Denmark as a sixth market if wanted.
+
+### 2026-10-01 — session 37: the code is all rights reserved, not MIT
+
+- **Licence changed at Clyde's direction.** `pyproject.toml` had declared MIT since the package was made installable, with no LICENSE file. Clyde does not want others using, copying or selling the code, so the repository now carries a root `LICENSE` reading "Copyright © 2026 Clyde Lartey. All rights reserved", both READMEs end with the same notice, and `pyproject.toml` says "Proprietary. All rights reserved."
+- The repository stays public so the work can be read and evaluated. That is a deliberate distinction to keep in every write-up: **public, not open source.** Do not describe this project as open source or MIT anywhere.
+- Third-party files keep their own licences and are listed in `LICENSE`: the vendored KLineChart bundle (Apache-2.0) and the DMTF Redfish fixtures (BSD-3-Clause). The Philly trace is not in the repository (CC BY 4.0, Microsoft).
+- Known limits, recorded rather than hidden: copies taken while the MIT label was public may have been taken under MIT, and GitHub's terms let anyone view and fork a public repository on GitHub. Making the repository private is the only way to stop it being read.
