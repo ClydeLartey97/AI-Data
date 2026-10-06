@@ -1,0 +1,103 @@
+
+<figure class="ch" id="__ID__" style="--series: var(__COLOR__);" tabindex="0">
+  <figcaption class="ch-head">
+    <div class="ch-id">
+      <span class="ch-label"><span class="ch-dot"></span>__LABEL__</span>
+      <span class="ch-unit">__UNIT__</span>
+    </div>
+    <div class="ch-read">
+      <span class="ch-val" data-val>—</span>
+      <span class="ch-when" data-when></span>
+    </div>
+    <div class="ch-ohlc" data-ohlc></div>
+    <span class="ch-ivtag" data-iv></span>
+    <div class="ch-stats" data-stats></div>
+  </figcaption>
+
+  <div class="ch-bar">
+    <span class="ch-grp" role="group" aria-label="Time range">
+      <span class="ch-lbl">Range</span>
+      <span class="ch-seg ch-ranges">__PILLS__</span>
+    </span>
+    <span class="ch-grp" role="group" aria-label="Candle interval">
+      <span class="ch-lbl">Interval</span>
+      <span class="ch-seg ch-intervals">__INTERVALS__</span>
+    </span>
+    <span class="ch-grp" role="group" aria-label="Chart type">
+      <span class="ch-lbl">Type</span>
+      <span class="ch-seg ch-types">
+        <button type="button" data-type="area" class="on">Area</button>
+        <button type="button" data-type="line">Line</button>
+        <button type="button" data-type="candle">Candles</button>
+        <button type="button" data-type="bar">Bars</button>
+        <button type="button" data-type="baseline">Baseline</button>
+        <button type="button" data-type="histogram">Histogram</button>
+        <button type="button" data-type="heatmap">Heatmap</button>
+      </span>
+    </span>
+    <span class="ch-grp" role="group" aria-label="Overlays">
+      <span class="ch-lbl">Overlay</span>
+      <span class="ch-seg ch-overlays">
+        <button type="button" data-ov="ma">MA</button>
+        <button type="button" data-ov="ema">EMA</button>
+        <button type="button" data-ov="pct">Percentiles</button>
+        <button type="button" data-ov="boll">Bollinger</button>
+        <button type="button" data-ov="spread">Spread</button>
+      </span>
+    </span>
+    <span class="ch-grp" role="group" aria-label="Value scale">
+      <span class="ch-lbl">Scale</span>
+      <button type="button" class="ch-btn" data-act="log" aria-pressed="false" title="Logarithmic Y axis">Log</button>
+      <button type="button" class="ch-btn" data-act="pctchg" aria-pressed="false" title="Show as percent change from range start">Δ%</button>
+    </span>
+    <span class="ch-grp ch-right">
+      <button type="button" class="ch-btn" data-act="zone">UTC</button>
+      <button type="button" class="ch-btn on" data-act="grid" aria-pressed="true">Grid</button>
+      <button type="button" class="ch-btn on" data-act="cross" aria-pressed="true">Crosshair</button>
+      <button type="button" class="ch-btn" data-act="y-in" title="Zoom Y axis in">Y +</button>
+      <button type="button" class="ch-btn" data-act="y-out" title="Zoom Y axis out">Y −</button>
+      <button type="button" class="ch-btn" data-act="reset">Reset</button>
+      <button type="button" class="ch-btn" data-act="csv">CSV</button>
+      <button type="button" class="ch-btn" data-act="expand" aria-expanded="false">Full screen</button>
+    </span>
+  </div>
+
+  <button type="button" class="ch-full-close" aria-label="Close full-screen chart">Close</button>
+
+  <div class="ch-plot">
+    <div class="ch-legend" data-legend hidden></div>
+    <div class="ch-tip" data-tip hidden></div>
+    <svg viewBox="0 0 1000 __H__" preserveAspectRatio="none" role="img"
+         aria-label="__LABEL__ over time in __UNIT__">
+      <g class="ch-grid"></g>
+      <g class="ch-spans"></g>
+      <path class="ch-envelope" d=""/>
+      <g class="ch-pct" hidden><path class="ch-pctband" d=""/></g>
+      <g class="ch-boll" hidden><path class="ch-bollband" d=""/><path class="ch-bollmid" d=""/></g>
+      <g class="ch-marks"></g>
+      <path class="ch-ma" d="" hidden/>
+      <path class="ch-ema" d="" hidden/>
+      <g class="ch-now" hidden><line class="ch-nowline"/></g>
+      <rect class="ch-sel" hidden/>
+      <g class="ch-cross" hidden>
+        <line class="ch-vline"/><line class="ch-hline"/>
+        <circle class="ch-dot2" r="4"/>
+        <rect class="ch-ybadge" width="82" height="20" rx="5"/>
+        <text class="ch-badge-text ch-ybadge-text" text-anchor="middle"></text>
+        <rect class="ch-xbadge" width="138" height="20" rx="5"/>
+        <text class="ch-badge-text ch-xbadge-text" text-anchor="middle"></text>
+      </g>
+      <g class="ch-latest"><line class="ch-latest-line"/><rect class="ch-latest-badge"
+        width="82" height="20" rx="5"/><text class="ch-badge-text ch-latest-text"
+        text-anchor="middle"></text></g>
+      <g class="ch-yaxis"></g>
+      <g class="ch-axis"></g>
+    </svg>
+    <svg class="ch-sub" viewBox="0 0 1000 __HSUB__" preserveAspectRatio="none"
+         hidden aria-label="High-low spread per interval">
+      <g class="ch-subbars"></g>
+      <text class="ch-sublabel" x="4" y="11">spread (high − low)</text>
+    </svg>
+  </div>
+  <p class="ch-hint">Wheel zooms X · Shift-wheel zooms Y · drag pans X · Alt-drag pans Y · shift-drag selects · double-click resets</p>
+</figure>

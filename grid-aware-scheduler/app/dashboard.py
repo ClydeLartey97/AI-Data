@@ -28,6 +28,7 @@ from urllib.parse import urlencode
 from adapters.base_adapter import GridDataPoint
 from adapters.gb_regional import GBRegionalAdapter
 from core import analytics, feed
+from app import template
 from app.panels import (EXPAND_JS, PANEL_CSS, duration_panel, profile_panel,
                         savings_panel, scatter_panel)
 from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS, product_nav
@@ -245,6 +246,9 @@ def _analytics_grid(series: list[GridDataPoint], symbol: str) -> str:
 </section>"""
 
 
+_PAGE = template.load("dashboard.html")
+
+
 def render(series: list[GridDataPoint], job: Job, market: str, currency: str,
            *, context: "MarketContext | None" = None) -> str:
     if not series:
@@ -323,254 +327,13 @@ def render(series: list[GridDataPoint], job: Job, market: str, currency: str,
         f"<td>{'—' if p.price is None else f'{p.price:,.2f}'}</td></tr>"
         for p in series)
 
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grid Signal — {html.escape(market)}</title>
-{THEME_BOOTSTRAP}
-<style>
-:root {{
-  color-scheme: light dark;
-  --bg: #F2F2F7;
-  --card: #FFFFFF;
-  --text: #000000;
-  --text-2: rgba(60,60,67,0.60);
-  --text-3: rgba(60,60,67,0.30);
-  --sep: rgba(60,60,67,0.18);
-  --carbon: {CARBON_LIGHT};
-  --price: {PRICE_LIGHT};
-  --blue: {PRICE_LIGHT};
-  --green: {CARBON_LIGHT};
-  --orange: #B35300;
-  --red: #C7261B;
-  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.06);
-}}
-/* Dark is a selected set of steps, not an automatic inversion: the series
-   colours are darker than Apple's own dark system colours, which sit above
-   the lightness band a chart needs. Declared under both scopes so the OS
-   setting and an explicit stamp each win. */
-@media (prefers-color-scheme: dark) {{
-  :root:not([data-theme="light"]) {{
-    --bg: #000000;
-    --card: #1C1C1E;
-    --text: #FFFFFF;
-    --text-2: rgba(235,235,245,0.60);
-    --text-3: rgba(235,235,245,0.30);
-    --sep: rgba(84,84,88,0.65);
-    --carbon: {CARBON_DARK};
-    --price: {PRICE_DARK};
-    --blue: {PRICE_DARK};
-    --green: {CARBON_DARK};
-    --orange: #E08A2E;
-    --red: #E2554A;
-    --shadow: none;
-  }}
-}}
-:root[data-theme="dark"] {{
-  --bg: #000000;
-  --card: #1C1C1E;
-  --text: #FFFFFF;
-  --text-2: rgba(235,235,245,0.60);
-  --text-3: rgba(235,235,245,0.30);
-  --sep: rgba(84,84,88,0.65);
-  --carbon: {CARBON_DARK};
-  --price: {PRICE_DARK};
-  --blue: {PRICE_DARK};
-  --green: {CARBON_DARK};
-  --orange: #E08A2E;
-  --red: #E2554A;
-  --shadow: none;
-}}
-* {{ box-sizing: border-box; }}
-body {{
-  margin: 0; padding: 0 24px 72px;
-  background: var(--bg); color: var(--text);
-  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-}}
-.wrap {{ max-width: 1080px; margin: 0 auto; }}
-header {{ padding: 56px 0 28px; }}
-h1 {{
-  margin: 0 0 6px; font-size: 40px; line-height: 1.08;
-  font-weight: 700; letter-spacing: -0.022em;
-}}
-.sub {{ color: var(--text-2); font-size: 17px; margin: 0; }}
-nav {{ margin-top: 16px; display: inline-flex; gap: 2px; padding: 3px; border-radius: 11px;
-  background: color-mix(in srgb, var(--text) 5%, transparent); }}
-nav a {{ font-size: 13px; font-weight: 550; text-decoration: none; padding: 6px 14px;
-  border-radius: 8px; color: var(--text-2); transition: background .15s ease, color .15s ease; }}
-nav a:hover {{ color: var(--text); }}
-nav a.on {{ background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.10); }}
-.market-controls {{ margin-top: 16px; display: flex; flex-wrap: wrap; gap: 9px; align-items: end; }}
-.market-controls label {{ display: flex; flex-direction: column; gap: 4px; color: var(--text-2);
-  font-size: 11px; font-weight: 550; }}
-.market-controls label span {{ display: flex; }}
-.market-controls select, .market-controls input {{ min-width: 170px; max-width: 300px; padding: 7px 28px 7px 9px;
-  border: 1px solid var(--sep); border-radius: 9px; background: var(--card); color: var(--text); font: inherit; font-size: 12px; }}
-.market-controls input {{ min-width: 190px; border-radius: 9px 0 0 9px; padding-right: 9px; }}
-.market-controls button {{ padding: 8px 12px; border: 0; border-radius: 9px; background: var(--price);
-  color: #fff; font: 650 12px/1 inherit; cursor: pointer; }}
-.market-controls label span button {{ border-radius: 0 9px 9px 0; }}
-.badge {{
-  display: inline-flex; align-items: center; gap: 6px;
-  margin-top: 14px; padding: 5px 11px; border-radius: 980px;
-  background: color-mix(in srgb, var(--carbon) 12%, transparent);
-  color: var(--carbon); font-size: 13px; font-weight: 590;
-  letter-spacing: -0.01em;
-}}
-.badge::before {{
-  content: ""; width: 6px; height: 6px; border-radius: 50%;
-  background: currentColor;
-}}
-.card {{
-  background: var(--card); border-radius: 18px; padding: 22px 24px;
-  box-shadow: var(--shadow); margin-bottom: 18px;
-}}
-.card > h2 {{
-  margin: 0 0 4px; font-size: 20px; font-weight: 640; letter-spacing: -0.015em;
-}}
-.card > .note {{ margin: 0 0 18px; color: var(--text-2); font-size: 14px; }}
-.tiles {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 1px;
-         background: var(--sep); border-radius: 14px; overflow: hidden; }}
-.tile {{ background: var(--card); padding: 16px 18px; }}
-.tile-label {{ font-size: 13px; color: var(--text-2); letter-spacing: -0.005em; }}
-.tile-value {{ font-size: 30px; font-weight: 630; letter-spacing: -0.02em; margin: 4px 0 2px; }}
-.tile-sub {{ font-size: 13px; color: var(--text-2); }}
-.decision {{ display: grid; grid-template-columns: 1fr auto 1fr; gap: 18px; align-items: center; }}
-.slot {{ padding: 16px 18px; border-radius: 14px; background: color-mix(in srgb, var(--text) 4%, transparent); }}
-.slot.win {{ background: color-mix(in srgb, var(--price) 10%, transparent); }}
-.slot h3 {{ margin: 0 0 8px; font-size: 12.5px; font-weight: 600; color: var(--text-2);
-            letter-spacing: -0.005em; }}
-.slot .when {{ font-size: 19px; font-weight: 620; letter-spacing: -0.015em; }}
-.slot .figs {{ margin-top: 8px; font-size: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }}
-.arrow {{ color: var(--text-3); font-size: 22px; }}
-.result {{ margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--sep);
-           display: flex; flex-wrap: wrap; gap: 28px; }}
-.result div span {{ display: block; }}
-.result .k {{ font-size: 13px; color: var(--text-2); }}
-.result .v {{ font-size: 22px; font-weight: 620; letter-spacing: -0.015em; }}
-.chart {{ margin: 0; position: relative; }}
-.chart svg {{ width: 100%; height: 260px; display: block; overflow: visible; }}
-.area {{ fill: var(--series); opacity: .10; }}
-.line {{ fill: none; stroke: var(--series); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round;
-         vector-effect: non-scaling-stroke; }}
-.band {{ fill: var(--series); opacity: .13; }}
-.grid {{ stroke: var(--sep); stroke-width: 1; vector-effect: non-scaling-stroke; }}
-.tick, .tlab {{ fill: var(--text-2); font-size: 11px; font-family: inherit; }}
-.cross {{ stroke: var(--text-3); stroke-width: 1; vector-effect: non-scaling-stroke; }}
-.dot {{ fill: var(--series); stroke: var(--card); stroke-width: 2; }}
-.tip {{
-  position: absolute; pointer-events: none; z-index: 5;
-  background: var(--card); color: var(--text); border: 1px solid var(--sep);
-  border-radius: 10px; padding: 8px 11px; font-size: 13px; white-space: nowrap;
-  box-shadow: 0 4px 16px rgba(0,0,0,.14); transform: translate(-50%, -120%);
-  font-variant-numeric: tabular-nums;
-}}
-.tip b {{ font-weight: 620; }}
-.legend {{ display: flex; gap: 7px; align-items: center; font-size: 13px; color: var(--text-2); margin-bottom: 12px; }}
-.swatch {{ width: 10px; height: 10px; border-radius: 3px; background: var(--series); }}
-details {{ margin-top: 6px; }}
-summary {{ cursor: pointer; font-size: 14px; color: var(--price); font-weight: 510; }}
-table {{ width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px;
-         font-variant-numeric: tabular-nums; }}
-th, td {{ text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--sep); }}
-th:first-child, td:first-child {{ text-align: left; }}
-th {{ color: var(--text-2); font-weight: 510; }}
-.foot {{ color: var(--text-2); font-size: 13px; margin-top: 26px; }}
-table.regions {{ margin-top: 16px; }}
-table.regions td, table.regions th {{ text-align: left; }}
-table.regions td:nth-child(2), table.regions th:nth-child(2) {{ text-align: right;
-  font-variant-numeric: tabular-nums; width: 90px; }}
-.mixcell {{ color: var(--text-2); font-size: 12px; }}
-.barcell {{ width: 30%; }}
-.rbar {{ display: block; height: 6px; border-radius: 3px; background: var(--carbon);
-  opacity: .55; }}
-.sr-only {{ position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }}
-.empty {{ color: var(--text-2); }}
-/* SVG elements ignore the HTML `hidden` attribute, which left the hover dot
-   parked at 0,0 as a stray mark on every chart. */
-svg [hidden] {{ display: none; }}
-{CHART_CSS}
-{PANEL_CSS}
-.grid4 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 12px; margin-bottom: 18px; }}
-.pnl {{ background: var(--card); border-radius: 12px; padding: 14px 16px 12px;
-  box-shadow: var(--shadow); }}
-.pnl.span2 {{ grid-column: span 2; }}
-.pnl h3 {{ margin: 0 0 10px; font-size: 13px; font-weight: 640; letter-spacing: -0.008em;
-  color: var(--text); }}
-.pnl h3 em {{ font-style: normal; color: var(--text-2);
-  font-weight: 500; letter-spacing: 0; }}
-.pnl-note {{ margin: 8px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--text-2); }}
-.pnl-note b {{ color: var(--text); font-weight: 640; font-variant-numeric: tabular-nums; }}
-@media (max-width: 760px) {{ .pnl.span2 {{ grid-column: span 1; }} }}
-@media (max-width: 720px) {{
-  .decision {{ grid-template-columns: 1fr; }}
-  .arrow {{ display: none; }}
-  h1 {{ font-size: 32px; }}
-}}
-{THEME_CSS}
-</style>
-</head>
-<body>
-{THEME_CONTROL}
-<div class="wrap">
-
-<header>
-  <span class="product-name">AI Energy</span><h1>Energy</h1>
-  <p class="sub">{html.escape(market)} · {html.escape(location_name)} · {html.escape(range_start.strftime('%a %d %b'))} to {html.escape(series[-1].timestamp.strftime('%a %d %b %Y'))}</p>
-  {navigation}
-  {_market_controls(context)}
-  <div class="badge">MEASURED · {html.escape(signal_mode)} · {complete_count} of {len(series)} half-hours fully scored</div>
-</header>
-
-<section class="card">
-  <h2>Latest fully scored interval</h2>
-  <div class="tiles">
-    {_tile("Carbon intensity", f"{current.carbon_intensity:,.0f}" if current.carbon_intensity is not None else "—",
-           "gCO₂/kWh · " + html.escape(carbon_label), accent="--carbon")}
-    {_tile("Price", f"{symbol}{current.price:,.2f}" if current.price is not None else "—",
-           "per MWh · " + html.escape(price_label), accent="--price")}
-    {_tile("Cleanest in range", f"{min(live_c):,.0f}", f"gCO₂/kWh · {_spread(live_c)}")}
-    {_tile("Cheapest in range", f"{symbol}{min(live_p):,.2f}", f"per MWh · {_spread(live_p)}")}
-  </div>
-</section>
-
-{_analytics_grid(series, symbol)}
-
-{_regions_card() if context is None or context.market_key == "GB" else ""}
-
-<section class="card">
-  <h2>Scheduling decision</h2>
-  <p class="note">
-    {html.escape(job.name)} — {job.power_kw:g} kW for {job.duration_periods * 0.5:g} h
-    ({job.energy_kwh:,.1f} kWh), deadline {job.deadline_periods * 0.5:g} h.
-    Optimising for cost, decided over the {job.deadline_periods * 0.5:g} h from
-    {html.escape(horizon[0].timestamp.strftime('%a %d %b %H:%M'))}.
-  </p>
-  <div class="decision">
-    <div class="slot">
-      <h3>Baseline · run immediately</h3>
-      <div class="when">{html.escape(baseline.start_time.strftime('%a %d %b, %H:%M'))}</div>
-      <div class="figs">{symbol}{baseline.cost:,.2f} · {baseline.carbon_kg:,.2f} kgCO₂</div>
-    </div>
-    <div class="arrow">→</div>
-    <div class="slot win">
-      <h3>Scheduled · cheapest window</h3>
-      <div class="when">{html.escape(scheduled.start_time.strftime('%a %d %b, %H:%M'))}</div>
-      <div class="figs">{symbol}{scheduled.cost:,.2f} · {scheduled.carbon_kg:,.2f} kgCO₂</div>
-    </div>
-  </div>
-  <div class="result">
-    <div><span class="k">Cost saved</span><span class="v">{symbol}{cost_cmp.cost_saved:,.2f} ({cost_cmp.cost_saved_pct:.1f}%)</span></div>
-    <div><span class="k">Carbon saved</span><span class="v">{cost_cmp.carbon_saved_g / 1000:,.2f} kg ({cost_cmp.carbon_saved_pct:.1f}%)</span></div>
-    <div><span class="k">Delayed by</span><span class="v">{cost_cmp.delay_hours:g} h</span></div>
-  </div>
-</section>
-
-{"" if not disagree else f'''
+    carbon_tile = _tile("Carbon intensity", f"{current.carbon_intensity:,.0f}" if current.carbon_intensity is not None else "—",
+                        "gCO₂/kWh · " + html.escape(carbon_label), accent="--carbon")
+    price_tile = _tile("Price", f"{symbol}{current.price:,.2f}" if current.price is not None else "—",
+                       "per MWh · " + html.escape(price_label), accent="--price")
+    cleanest_tile = _tile("Cleanest in range", f"{min(live_c):,.0f}", f"gCO₂/kWh · {_spread(live_c)}")
+    cheapest_tile = _tile("Cheapest in range", f"{symbol}{min(live_p):,.2f}", f"per MWh · {_spread(live_p)}")
+    disagreement = "" if not disagree else f'''
 <section class="card">
   <h2>Cheapest and cleanest windows differ</h2>
   <p class="note">
@@ -583,87 +346,68 @@ svg [hidden] {{ display: none; }}
     {_tile("Cost-optimal", html.escape(scheduled.start_time.strftime('%H:%M')), f"{symbol}{scheduled.cost:,.2f} · {scheduled.carbon_kg:,.2f} kgCO₂", accent="--price")}
     {_tile("Carbon-optimal", html.escape(clean.start_time.strftime('%H:%M')), f"{symbol}{clean.cost:,.2f} · {clean.carbon_kg:,.2f} kgCO₂", accent="--carbon")}
   </div>
-</section>'''}
-
-<section class="card">
-  <h2>Carbon intensity</h2>
-  <p class="note">Shaded span = carbon-optimal window. Drag to zoom.</p>
-  {chart(ChartSeries("carbon", "Carbon intensity", "gCO₂/kWh",
-                     [(p.timestamp, p.carbon_intensity) for p in series],
-                     "--carbon", 0,
-                     bands=[Band(clean.start_time, clean_end, "carbon-optimal")]),
-         height=300, default_range="1W")}
-</section>
-
-<section class="card">
-  <h2>Price</h2>
-  <p class="note">Shaded span = cost-optimal window. Drag to zoom.</p>
-  {chart(ChartSeries("price", price_label, f"{symbol}/MWh",
-                     [(p.timestamp, p.price) for p in series],
-                     "--price", 2, prefix=symbol,
-                     bands=[Band(scheduled.start_time, scheduled_end, "cost-optimal")]),
-         height=300, default_range="1W")}
-</section>
-
-<section class="card">
-  <h2>Underlying data</h2>
-  <details>
-    <summary>Show {len(series)} settlement periods</summary>
-    <table>
-      <thead><tr><th>Period start (UTC)</th><th>gCO₂/kWh</th><th>{symbol}/MWh</th></tr></thead>
-      <tbody>{rows}</tbody>
-    </table>
-  </details>
-</section>
-
-<p class="foot">
-  {html.escape(provenance)}
-  Signal mode: {html.escape(signal_mode)}.
-  Generated {html.escape(generated.strftime('%Y-%m-%d %H:%M UTC'))}.
-</p>
-
-</div>
-<script>
-{EXPAND_JS}
-
-var marketSelect = document.getElementById("marketSelect");
-if (marketSelect) marketSelect.addEventListener("change", function () {{
-  var defaults = {{GB:"national",CAISO:"sp15",NYISO:"nyc",MISO:"indiana",ERCOT:"houston"}};
-  var defaultLocation = defaults[marketSelect.value] || "national";
-  location.href = "/grid?market=" + encodeURIComponent(marketSelect.value) +
-    "&location=" + encodeURIComponent(defaultLocation);
-}});
-
-// Crosshair + tooltip. An HTML chart is interactive by default; a static
-// picture of a time series makes the reader guess at values.
-for (const fig of document.querySelectorAll('.chart')) {{
-  const svg = fig.querySelector('svg'), tip = fig.querySelector('.tip');
-  const hover = fig.querySelector('.hover'), cross = fig.querySelector('.cross');
-  const dot = fig.querySelector('.dot');
-  const pts = (svg.dataset.points || '').split(';').filter(Boolean).map(s => {{
-    const [x, y, when, v] = s.split(','); return {{x: +x, y: +y, when, v: +v}};
-  }});
-  if (!pts.length) continue;
-  const vb = svg.viewBox.baseVal;
-
-  svg.addEventListener('pointermove', e => {{
-    const r = svg.getBoundingClientRect();
-    const vx = (e.clientX - r.left) / r.width * vb.width;
-    let best = pts[0];
-    for (const p of pts) if (Math.abs(p.x - vx) < Math.abs(best.x - vx)) best = p;
-    hover.hidden = false;
-    cross.setAttribute('x1', best.x); cross.setAttribute('x2', best.x);
-    dot.setAttribute('cx', best.x); dot.setAttribute('cy', best.y);
-    tip.hidden = false;
-    tip.innerHTML = '<b>' + best.v.toLocaleString(undefined, {{maximumFractionDigits: 2}}) + '</b> · ' + best.when;
-    tip.style.left = (best.x / vb.width * r.width) + 'px';
-    tip.style.top = (best.y / vb.height * r.height) + 'px';
-  }});
-  svg.addEventListener('pointerleave', () => {{ hover.hidden = true; tip.hidden = true; }});
-}}
-</script>
-</body>
-</html>"""
+</section>'''
+    carbon_chart = chart(ChartSeries("carbon", "Carbon intensity", "gCO₂/kWh",
+                                     [(p.timestamp, p.carbon_intensity) for p in series],
+                                     "--carbon", 0,
+                                     bands=[Band(clean.start_time, clean_end, "carbon-optimal")]),
+                         height=300, default_range="1W")
+    price_chart = chart(ChartSeries("price", price_label, f"{symbol}/MWh",
+                                    [(p.timestamp, p.price) for p in series],
+                                    "--price", 2, prefix=symbol,
+                                    bands=[Band(scheduled.start_time, scheduled_end, "cost-optimal")]),
+                        height=300, default_range="1W")
+    return template.fill(_PAGE, {
+        "__MARKET_NAME__": html.escape(market),
+        "__THEME_BOOTSTRAP__": THEME_BOOTSTRAP,
+        "__CARBON_LIGHT__": CARBON_LIGHT,
+        "__PRICE_LIGHT__": PRICE_LIGHT,
+        "__CARBON_DARK__": CARBON_DARK,
+        "__PRICE_DARK__": PRICE_DARK,
+        "__CHART_CSS__": CHART_CSS,
+        "__PANEL_CSS__": PANEL_CSS,
+        "__THEME_CSS__": THEME_CSS,
+        "__THEME_CONTROL__": THEME_CONTROL,
+        "__LOCATION_NAME__": html.escape(location_name),
+        "__RANGE_START__": html.escape(range_start.strftime('%a %d %b')),
+        "__RANGE_END__": html.escape(series[-1].timestamp.strftime('%a %d %b %Y')),
+        "__NAVIGATION__": navigation,
+        "__MARKET_CONTROLS__": _market_controls(context),
+        "__SIGNAL_MODE__": html.escape(signal_mode),
+        "__COMPLETE_COUNT__": complete_count,
+        "__SERIES_COUNT__": len(series),
+        "__CARBON_TILE__": carbon_tile,
+        "__PRICE_TILE__": price_tile,
+        "__CLEANEST_TILE__": cleanest_tile,
+        "__CHEAPEST_TILE__": cheapest_tile,
+        "__ANALYTICS__": _analytics_grid(series, symbol),
+        "__REGIONS__": _regions_card() if context is None or context.market_key == "GB" else "",
+        "__JOB_NAME__": html.escape(job.name),
+        "__JOB_POWER_KW__": f'{job.power_kw:g}',
+        "__JOB_HOURS__": f'{job.duration_periods * 0.5:g}',
+        "__JOB_ENERGY_KWH__": f'{job.energy_kwh:,.1f}',
+        "__DEADLINE_HOURS__": f'{job.deadline_periods * 0.5:g}',
+        "__HORIZON_START__": html.escape(horizon[0].timestamp.strftime('%a %d %b %H:%M')),
+        "__BASELINE_START__": html.escape(baseline.start_time.strftime('%a %d %b, %H:%M')),
+        "__SYMBOL__": symbol,
+        "__BASELINE_COST__": f'{baseline.cost:,.2f}',
+        "__BASELINE_CARBON_KG__": f'{baseline.carbon_kg:,.2f}',
+        "__SCHEDULED_START__": html.escape(scheduled.start_time.strftime('%a %d %b, %H:%M')),
+        "__SCHEDULED_COST__": f'{scheduled.cost:,.2f}',
+        "__SCHEDULED_CARBON_KG__": f'{scheduled.carbon_kg:,.2f}',
+        "__COST_SAVED__": f'{cost_cmp.cost_saved:,.2f}',
+        "__COST_SAVED_PCT__": f'{cost_cmp.cost_saved_pct:.1f}',
+        "__CARBON_SAVED_KG__": f'{cost_cmp.carbon_saved_g / 1000:,.2f}',
+        "__CARBON_SAVED_PCT__": f'{cost_cmp.carbon_saved_pct:.1f}',
+        "__DELAY_HOURS__": f'{cost_cmp.delay_hours:g}',
+        "__DISAGREEMENT__": disagreement,
+        "__CARBON_CHART__": carbon_chart,
+        "__PRICE_CHART__": price_chart,
+        "__ROWS__": rows,
+        "__PROVENANCE__": html.escape(provenance),
+        "__GENERATED__": html.escape(generated.strftime('%Y-%m-%d %H:%M UTC')),
+        "__EXPAND_JS__": EXPAND_JS,
+    })
 
 
 PRICE_PROVIDER_NOTE = "APXMIDP only — providers are not averaged, because N2EXMIDP reports structural zeros"

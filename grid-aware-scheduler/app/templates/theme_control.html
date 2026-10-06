@@ -1,0 +1,20 @@
+<div class="theme-control" aria-label="Appearance">
+<span>Light</span><label class="theme-toggle">
+<input id="themeToggle" type="checkbox" role="switch" aria-label="Use dark mode">
+<span class="theme-track" aria-hidden="true"></span></label><span>Dark</span></div>
+<script>
+(function(){var toggle=document.getElementById("themeToggle");if(!toggle)return;
+function apply(theme,persist){document.documentElement.dataset.theme=theme;
+toggle.checked=theme==="dark";toggle.setAttribute("aria-checked",String(toggle.checked));
+if(persist){try{localStorage.setItem("grid-aware-theme",theme)}catch(error){}}}
+apply(document.documentElement.dataset.theme||"light",false);
+toggle.addEventListener("change",function(){apply(toggle.checked?"dark":"light",true)});
+window.addEventListener("storage",function(event){if(event.key==="grid-aware-theme"&&
+(event.newValue==="light"||event.newValue==="dark"))apply(event.newValue,false)});})();
+</script>
+<div class="page-loading" id="pageLoading" role="status" hidden>Loading. Market data can take up to 30 seconds.</div>
+<script>
+(function(){var notice=document.getElementById("pageLoading");if(!notice)return;
+window.addEventListener("beforeunload",function(){notice.hidden=false});
+window.addEventListener("pageshow",function(){notice.hidden=true});})();
+</script>

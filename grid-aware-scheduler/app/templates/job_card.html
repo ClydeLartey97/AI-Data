@@ -1,0 +1,74 @@
+<article class="job" data-job>
+      <div class="job-head">
+        <input data-field="job_id" aria-label="Job ID" value="__JOB_ID__">
+        <span class="job-cell job-stage" data-cell="stage"></span>
+        <span class="job-cell" data-cell="runtime"></span>
+        <span class="job-cell" data-cell="power"></span>
+        <span class="job-cell" data-cell="deadline"></span>
+        <span class="job-actions"><button type="button" class="job-edit-toggle" aria-expanded="false">Edit</button>
+        <button type="button" class="remove" aria-label="Remove job">Remove</button></span>
+      </div>
+      <p class="job-flag" data-flag hidden></p>
+      <div class="job-body" hidden>
+        <div class="fields">
+          <label>Stage name<input data-field="stage_name" value="__STAGE_NAME__"></label>
+          <label>Runtime · hours<input data-field="runtime_hours" type="number" min="0.000001" step="0.05" value="__RUNTIME__"></label>
+          <label>IT power · kW<input data-field="it_power_kw" type="number" min="0" step="0.001" value="__POWER__"></label>
+          <label>Deadline · hours<input data-field="deadline_hours" type="number" min="0.01" step="0.5" value="__DEADLINE__"></label>
+          <label class="check"><input data-field="mandatory" type="checkbox" checked>Mandatory workload</label>
+        </div>
+        <details class="job-advanced">
+          <summary>Advanced</summary>
+          <div class="field-groups">
+          <details class="field-group">
+            <summary><h4>Workflow</h4></summary>
+            <div class="fields">
+              <label>Workflow ID<input data-field="workflow_id" value="__WORKFLOW_ID__"></label>
+              <label>Depends on stage IDs<input data-field="depends_on" value="__DEPENDS_ON__" placeholder="stage-a, stage-b"></label>
+              <label>Workload class<input data-field="label" value="__LABEL__"></label>
+              <label>Run mode<select data-field="run_mode">__RUN_MODES__</select></label>
+            </div>
+          </details>
+          <details class="field-group">
+            <summary><h4>Execution</h4></summary>
+            <div class="fields">
+              <label>Model / deployment<input data-field="model_id" value="__MODEL_ID__"></label>
+              <label>Model version<input data-field="model_version" value="__MODEL_VERSION__"></label>
+              <label>Precision<select data-field="precision">__PRECISIONS__</select></label>
+              <label>Compute unit<select data-field="compute_unit">__COMPUTE_UNITS__</select></label>
+              <label>Execution hardware<input data-field="hardware" value="__HARDWARE__"></label>
+              <label>Useful work<input data-field="work_amount" type="number" min="0.000001" step="any" value="__AMOUNT__"></label>
+              <label>Work unit<select data-field="work_unit">__UNITS__</select></label>
+              <label>Checkpoint chunks<input data-field="checkpoint_count" type="number" min="1" max="24" step="1" value="__CHECKPOINT_COUNT__"></label>
+            </div>
+          </details>
+          <details class="field-group">
+            <summary><h4>Resources</h4></summary>
+            <div class="fields">
+              <label>PUE<input data-field="pue" type="number" min="1" max="5" step="0.01" value="__PUE__"></label>
+              <label>Memory required · GB<input data-field="memory_required_gb" type="number" min="0" step="0.1" value="__MEMORY_REQUIRED__"></label>
+              <label>Memory available · GB<input data-field="memory_available_gb" type="number" min="0" step="0.1" value="__MEMORY_AVAILABLE__"></label>
+            </div>
+          </details>
+          <details class="field-group">
+            <summary><h4>Quality</h4></summary>
+            <div class="fields">
+              <label>Quality score · 0 to 1<input data-field="quality_score" type="number" min="0" max="1" step="0.01" value="__QUALITY__"></label>
+              <label>Minimum quality<input data-field="minimum_quality" type="number" min="0" max="1" step="0.01" value="__MINIMUM__"></label>
+              <label>Operator utility<input data-field="utility" type="number" min="0.000001" step="0.5" value="__UTILITY__"></label>
+            </div>
+          </details>
+          <details class="field-group">
+            <summary><h4>Evidence</h4></summary>
+            <div class="fields">
+              <label>Governed evidence profile<select data-field="evidence_profile_id"><option value="">Estimated / manual inputs</option></select></label>
+              <label class="check"><input data-field="auto_evidence_profiles" type="checkbox">Compare every compatible governed profile</label>
+              <label>Evidence state<select data-field="provenance"><option value="ESTIMATED">Estimated scenario</option><option value="MEASURED">Measured</option></select></label>
+              <label>Evaluation suite<input data-field="evaluation_suite" value="scenario-eval"></label>
+              <label>Suite version<input data-field="evaluation_version" value="1.0"></label>
+            </div>
+          </details>
+          </div>
+        </details>
+      </div>
+    </article>

@@ -40,5 +40,8 @@ Repository = "https://github.com/ClydeLartey97/AI-Data"
 packages = ["adapters", "adapters.gb_sources", "adapters.gb_sources.elexon",
             "app", "core", "hardware"]
 
+[tool.setuptools.package-data]
+app = ["templates/*"]
+
 [tool.setuptools.dynamic]
 version = { attr = "app.api.PRODUCT_VERSION" }
