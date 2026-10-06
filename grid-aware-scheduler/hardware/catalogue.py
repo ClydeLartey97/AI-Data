@@ -162,7 +162,7 @@ _DEVICES = [
     # Apple publishes core counts and sometimes memory bandwidth. It publishes
     # neither GPU throughput nor per-component power, so these are
     # community-benchmarked estimates, marked ESTIMATED. This is precisely why
-    # auto-profiling matters most here — see HANDOFF.md.
+    # auto-profiling matters most here.
     _d("m1", "M1", _APPLE, "SoC", 2.6, 16, 68, 20, 2, UNI, 0.18,
        "LPDDR4X", "Consumer", "community benchmarks", prov=Provenance.ESTIMATED),
     _d("m1-pro", "M1 Pro", _APPLE, "SoC", 5.2, 32, 200, 30, 3, UNI, 0.19,

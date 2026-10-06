@@ -157,7 +157,7 @@ def scaling_efficiency(fleet: Fleet, job: Job) -> float:
     reports ~99% where a real 32-GPU run might see 70-85%. It is sound for
     comparing configurations and should not be quoted as a scaling prediction.
     Replacing it with measured scaling curves is the natural follow-on to the
-    auto-profiling work (see HANDOFF.md).
+    auto-profiling work.
     """
     n = fleet.count
     if n <= 1 or fleet.interconnect is Interconnect.UNIFIED:

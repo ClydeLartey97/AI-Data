@@ -7,7 +7,7 @@ location as the grid region turns the dashboard from "trust this figure" into
 "here is why the figure is what it is" — 96% wind in North Scotland is a
 weather fact before it is a grid fact.
 
-It also matters for the forecasting work already decided in HANDOFF.md: GB's
+It also matters for forecasting: GB's
 own operator forecast is too good to beat, but CAISO and ERCOT have no free
 transparent equivalent, and weather is the input any such model is built on.
 This is the feed that work would start from.

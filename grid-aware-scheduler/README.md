@@ -18,10 +18,6 @@ price and carbon data from five markets, on-site generation forecasts and
 half-hourly facility power limits into one exact, auditable placement
 decision.
 
-**→ Read [`HANDOFF.md`](HANDOFF.md) first.** It is the single source of truth:
-full state, prior art, every design decision with its reasoning, measured
-findings, and everything still outstanding.
-
 ---
 
 ## The idea in one line
@@ -243,7 +239,8 @@ carbon-intelligent computing, Compute Gardener — **not a new category**, and i
 does **not** generate carbon credits. It is advisory: it must not yet be
 trusted to launch or defer a customer's workload. See
 [`docs/commercial-readiness.md`](docs/commercial-readiness.md) for the exact
-boundary, and `HANDOFF.md` for the prior art it builds on.
+boundary, and the root README's "What this is not" for the prior art it
+builds on.
 
 ---
 

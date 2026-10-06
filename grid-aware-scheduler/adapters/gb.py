@@ -1,10 +1,10 @@
 """
 GB market adapter — the corrected implementation.
 
-This supersedes ``gb_adapter.py``, which is kept unchanged as the historical
-first pass. The difference is the price path, and it matters:
+This supersedes an earlier GB adapter (removed; it is in git history). The
+difference is the price path, and it matters:
 
-``gb_adapter.py`` averages Market Index price across every data provider that
+The earlier adapter averaged Market Index price across every data provider that
 reports for a settlement period. Only two providers exist, and ``N2EXMIDP``
 publishes structural zeros — 100% zero across Aug/Jun/Feb 2026, 99.6% zero in
 Nov 2025 (measured, not assumed). Averaging therefore halves every price, and
