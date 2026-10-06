@@ -13,7 +13,9 @@ That change is what allows a real catalogue, arbitrary fleet sizes, any
 precision, and a custom model defined by parameter count alone.
 
 Provenance stays visible: SPEC for datasheet-backed hardware, ESTIMATED for
-Apple, where no vendor figures for GPU throughput or package power exist.
+Apple, where no vendor figures for GPU throughput or package power exist —
+except where `hardware.resolve` has better: the M2 is MEASURED and its larger
+siblings are DERIVED from that measurement.
 """
 from __future__ import annotations
 
@@ -33,6 +35,8 @@ from core import models as model_catalog
 from core.grid import PERIOD_HOURS
 from core.renewables import solar_capacity_factor, wind_capacity_factor
 from hardware import catalogue
+from hardware.derive import MEASURED_M2
+from hardware.resolve import resolve
 from app.panels import EXPAND_JS, PANEL_CSS
 from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS, product_nav
 
@@ -41,15 +45,36 @@ OUT = Path(__file__).resolve().parent / "build" / "simulator.html"
 COUNTS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
 
 
+#: The committed M2 measurement, so every clone shows the same evidence.
+MEASURED = {MEASURED_M2.chip_key: {
+    "achieved_gflops": MEASURED_M2.gemm_fp16_gflops,
+    "bandwidth_gbs": MEASURED_M2.memory_bandwidth_gbs,
+}}
+
+
 def device_specs() -> dict:
-    return {k: {
-        "name": d.name, "vendor": d.vendor, "kind": d.kind,
-        "tflops": d.peak_tflops_bf16, "mfu": d.mfu,
-        "mem": d.memory_gb, "bw": d.memory_bandwidth_gbs,
-        "tdp": d.tdp_watts, "idle": d.idle_watts,
-        "link": d.interconnect.value, "prov": d.provenance.value,
-        "source": d.source,
-    } for k, d in catalogue.CATALOGUE.items()}
+    specs = {}
+    for k, d in catalogue.CATALOGUE.items():
+        spec = {
+            "name": d.name, "vendor": d.vendor, "kind": d.kind,
+            "tflops": d.peak_tflops_bf16, "mfu": d.mfu,
+            "mem": d.memory_gb, "bw": d.memory_bandwidth_gbs,
+            "tdp": d.tdp_watts, "idle": d.idle_watts,
+            "link": d.interconnect.value, "prov": d.provenance.value,
+            "catprov": d.provenance.value, "source": d.source,
+        }
+        # A measured or derived figure outranks the catalogue's. Achieved
+        # bandwidth replaces the spec bus for decode; peak and utilisation
+        # stay as the catalogue has them, because dense GEMM is a ceiling,
+        # not what a transformer reaches.
+        resolved = resolve(k, measured=MEASURED, catalogue_device=d)
+        if resolved.achieved_gflops.known:
+            spec["prov"] = resolved.achieved_gflops.provenance
+            spec["evidence"] = resolved.summary()
+        if resolved.bandwidth_gbs.known:
+            spec["bw"] = resolved.bandwidth_gbs.value
+        specs[k] = spec
+    return specs
 
 
 def model_specs() -> dict:
@@ -308,6 +333,7 @@ border-radius:5px;margin-left:6px;vertical-align:2px}}
 .prov.SPEC{{background:color-mix(in srgb,var(--blue) 14%,transparent);color:var(--blue)}}
 .prov.ESTIMATED{{background:color-mix(in srgb,var(--orange) 16%,transparent);color:var(--orange)}}
 .prov.MEASURED{{background:color-mix(in srgb,var(--green) 14%,transparent);color:var(--green)}}
+.prov.DERIVED{{background:color-mix(in srgb,var(--green) 9%,transparent);color:var(--text-2)}}
 .detected{{margin-bottom:18px;padding:12px 15px;border-radius:12px;
 background:color-mix(in srgb,var(--green) 10%,transparent);color:var(--text);font-size:13px}}
 .detected>span{{display:block;color:var(--green);font-size:11.5px;font-weight:650;
@@ -626,8 +652,9 @@ function render(){{
         "Training state replicated on every accelerator.")+" "+nf(S.statebytes,0)+
         " bytes/parameter with "+nf(S.headroom,0)+"% activation and buffer reserve.",
     dev.memprov ? "Memory capacity: "+dev.memprov+" from local hardware detection."
-      : "Memory capacity: "+dev.prov+" catalogue value.",
-    "Performance and power source: "+(dev.source||"\\u2014")
+      : "Memory capacity: "+dev.catprov+" catalogue value.",
+    "Performance and power source: "+(dev.source||"\\u2014")+
+      (dev.evidence?". Resolved: "+dev.evidence+".":"")
   ].map(function(x){{return "<li>"+x+"</li>";}}).join("");
 
   var rows=Object.keys(D).map(function(k){{return {{k:k,d:D[k],r:est(k,S.count)}};}})

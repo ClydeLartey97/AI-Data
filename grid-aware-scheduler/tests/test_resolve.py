@@ -160,3 +160,19 @@ def test_baseline_rows_may_be_objects_rather_than_dicts():
 def test_no_rows_is_not_an_error():
     assert measured_from_baselines(None) == {}
     assert measured_from_baselines([]) == {}
+
+
+# --- the hardware page uses it --------------------------------------------
+
+def test_the_hardware_page_shows_the_measured_m2_as_measured():
+    """The page used to label the M2 ESTIMATED while the measurement sat
+    unused. Measured beats derived beats catalogue, and the catalogue label
+    still describes memory, which nobody measured here."""
+    from app.simulator import device_specs
+    specs = device_specs()
+    assert specs["m2"]["prov"] == "MEASURED"
+    assert specs["m2"]["bw"] == pytest.approx(75.7)
+    assert specs["m2"]["catprov"] == "ESTIMATED"
+    assert specs["m2-max"]["prov"] == "DERIVED"
+    assert specs["h100-sxm"]["prov"] == "SPEC"
+    assert "evidence" not in specs["h100-sxm"]
