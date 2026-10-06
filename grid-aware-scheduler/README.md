@@ -109,8 +109,13 @@ batch sizes of 63, 81, 54 and 37 — four vendors, one equation.
 
 ## Modelling a datacentre you cannot visit
 
-Apple's AI servers are built from Apple silicon: rack chassis of small,
-individually removable compute boards, each with one SoC and its own memory.
+This is a standalone model in `hardware/apple_rack.py`, covered by its own
+tests. It is not part of the app: the rack layout it models is reported, not
+published by Apple, so it is kept out of the product.
+
+Apple's AI servers are reported to be built from Apple silicon: rack chassis
+of small, individually removable compute boards, each with one SoC and its own
+memory.
 **That is the same silicon anyone can buy and measure.**
 
 So a fleet built from a part you can hold is a fleet you can characterise
@@ -127,7 +132,7 @@ a comment:
 wrong by analogy with GPU racks. Eight H200s on NVLink present as one pool;
 thirty-two Apple boards on a backplane do not. A 70B model at 4-bit needs
 42.2 GB and **will not run on a 24 GB board even though the chassis holds
-768 GB in total.** The planner refuses rather than aggregating, because
+768 GB in total.** The model refuses rather than aggregating, because
 aggregating would turn a physically impossible deployment into an attractive
 number.
 
