@@ -54,7 +54,7 @@ def test_a_carbon_objective_can_choose_a_different_window_than_cost():
 
 def test_every_workload_type_flows_through_the_same_scheduler():
     """The point of the type layer: the scheduler never learns what the work
-    is. Any non-continuous type reaches a placement."""
+    is. Every type reaches a placement."""
     for workload_type, attributes, extra in (
             (wt.WorkloadType.RENDERING,
              {"frame_count": 400, "seconds_per_frame": 36,
@@ -73,15 +73,6 @@ def test_every_workload_type_flows_through_the_same_scheduler():
         result = orch.recommend(spec, [_facility()], "balanced")
         assert result.chosen is not None, workload_type
 
-
-def test_mining_is_routed_away_from_the_deadline_flow():
-    spec = wt.build("m1", "Rig", wt.WorkloadType.MINING, NOW,
-                    duration_hours=24,
-                    attributes={"hash_rate_th_s": 100.0,
-                                "efficiency_j_per_th": 21.5,
-                                "revenue_per_th_day": 0.05})
-    with pytest.raises(wt.WorkloadRefused, match="core.mining"):
-        orch.recommend(spec, [_facility()])
 
 
 def test_the_renewable_objective_refuses_a_site_with_no_generation():

@@ -333,7 +333,7 @@ def make_handler(days: int, job: Job, cache: _Cache, sim_cache: _Cache,
                 # The selector contract: every workload type, its label, and
                 # the type-specific fields a form should render. The interface
                 # is generated from this rather than hand-written per type,
-                # which is what stops a ninth type needing its own page.
+                # which is what stops an eighth type needing its own page.
                 self._send_json({
                     "api_version": api.API_VERSION,
                     "product_version": api.PRODUCT_VERSION,

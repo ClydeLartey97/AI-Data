@@ -19,9 +19,6 @@ Duration never varies with price. The same workload placed in a cheap window
 and an expensive one takes exactly as long. Work finishes sooner only if more
 hardware or power headroom is allocated, which is a capacity decision and is
 reported separately as `headroom_available`.
-
-Mining does not come through here. It has no deadline to schedule against, so
-it is routed to `core.mining.dispatch` and the caller is told why.
 """
 from __future__ import annotations
 
@@ -201,11 +198,6 @@ def recommend(spec: wt.WorkloadSpec, facilities: list[FacilityOption],
     handful of sites — exhaustive is exact and takes microseconds, so there is
     no reason to approximate.
     """
-    if spec.continuous:
-        raise wt.WorkloadRefused(
-            f"{spec.definition.label} earns revenue continuously and has no "
-            f"completion deadline, so there is no window to place it in. Use "
-            f"core.mining.dispatch, which decides run-or-pause per interval.")
     if not facilities:
         raise ValueError("at least one facility is required")
 

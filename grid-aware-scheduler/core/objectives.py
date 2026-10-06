@@ -12,14 +12,12 @@ would mean touching the search. Adding them here means the search is unchanged
 and only its scoring inputs differ, so an objective can never introduce a bug
 into placement itself.
 
-**Two objectives cannot be expressed as weights, and they say so.**
+**One objective cannot be expressed as weights, and it says so.**
 `MAX_RENEWABLE` needs on-site generation data, which lives in
 `core/energy.py`'s dispatch rather than in the price/carbon series the planner
-scores. `MAX_PROFIT` only means anything for revenue-earning work, which today
-is mining alone and is handled by `core/mining.py`. Both are declared here so
-the interface can offer them, and both carry an explicit route to the module
-that actually implements them rather than being silently approximated by a
-weight that would answer a different question.
+scores. It is declared here so the interface can offer it, and it carries an
+explicit route to the module that actually implements it rather than being
+silently approximated by a weight that would answer a different question.
 """
 from __future__ import annotations
 
@@ -33,7 +31,6 @@ class Objective(str, Enum):
     MIN_CARBON = "min_carbon"
     MAX_RENEWABLE = "max_renewable"
     BALANCED = "balanced"
-    MAX_PROFIT = "max_profit"
     CUSTOM = "custom"
 
 
@@ -104,17 +101,6 @@ CATALOGUE: dict[Objective, ObjectiveSpec] = {
         weights=None,
         handled_by="core.energy.dispatch_energy with dispatch priority "
                    "'renewable', over a site declared in core.site_profile",
-    ),
-    Objective.MAX_PROFIT: ObjectiveSpec(
-        objective=Objective.MAX_PROFIT,
-        label="Maximum operating profit",
-        description="Only meaningful for work that earns revenue while it "
-                    "runs. Today that is mining alone; a deadline-bound job "
-                    "has a cost but no revenue, so 'profit' would just be "
-                    "cost with a sign flipped.",
-        weights=None,
-        handled_by="core.mining.dispatch, which compares revenue against "
-                   "energy cost, operating cost and export opportunity",
     ),
     Objective.CUSTOM: ObjectiveSpec(
         objective=Objective.CUSTOM,

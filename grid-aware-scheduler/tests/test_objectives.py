@@ -9,8 +9,7 @@ from core.objectives import (CATALOGUE, Objective, ObjectiveUnavailable,
 
 def test_every_requested_objective_exists():
     assert {o.value for o in Objective} == {
-        "min_cost", "min_carbon", "max_renewable", "balanced",
-        "max_profit", "custom"}
+        "min_cost", "min_carbon", "max_renewable", "balanced", "custom"}
 
 
 def test_cost_and_carbon_objectives_are_opposites():
@@ -31,10 +30,6 @@ def test_max_renewable_refuses_rather_than_pretending_to_be_min_carbon():
     with pytest.raises(ObjectiveUnavailable, match="core.energy"):
         resolve("max_renewable")
 
-
-def test_max_profit_refuses_and_points_at_the_mining_dispatcher():
-    with pytest.raises(ObjectiveUnavailable, match="core.mining"):
-        resolve("max_profit")
 
 
 def test_custom_needs_explicit_weights():
@@ -65,6 +60,6 @@ def test_negative_weights_are_refused():
 def test_the_catalogue_marks_which_objectives_need_other_machinery():
     entries = {e["objective"]: e for e in catalogue()}
     assert entries["balanced"]["expressible_as_weights"] is True
-    for key in ("max_renewable", "max_profit"):
+    for key in ("max_renewable",):
         assert entries[key]["expressible_as_weights"] is False
         assert entries[key]["handled_by"]

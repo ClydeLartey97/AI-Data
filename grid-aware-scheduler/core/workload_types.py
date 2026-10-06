@@ -12,7 +12,7 @@ interface.
 
 So this module does **not** touch the scheduler. It adds a declarative layer
 that compiles any workload type down to the contracts the scheduler already
-consumes. Adding a ninth workload type later means adding one `WorkloadType`
+consumes. Adding an eighth workload type later means adding one `WorkloadType`
 definition here — a name, its extra fields, and how those fields become power
 and duration — and changing nothing else. That is the whole design, and it is
 why the scheduling engine is not re-litigated for every new kind of work.
@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from typing import Callable
 
@@ -44,13 +44,13 @@ from typing import Callable
 #: `core/evidence.py` for AI modalities; the rest are what the new workload
 #: types actually produce. A unit is never converted into another unit —
 #: `core/portfolio.py` already refuses to add unlike work, and that refusal is
-#: what keeps "300 frames plus 40 terahashes" from becoming a meaningless sum.
+#: what keeps "300 frames plus 40 records" from becoming a meaningless sum.
 WORK_UNITS = frozenset({
     # existing AI modalities
     "tokens", "images", "audio_seconds", "samples",
     "training_examples", "optimizer_steps",
     # added for general compute
-    "frames", "terahashes", "simulation_steps", "records", "gigabytes",
+    "frames", "simulation_steps", "records", "gigabytes",
     "core_hours", "tasks",
 })
 
@@ -155,7 +155,6 @@ class WorkloadType(str, Enum):
 
     AI_TRAINING = "ai_training"
     AI_INFERENCE = "ai_inference"
-    MINING = "mining"
     RENDERING = "rendering"
     HPC = "hpc"
     DATA_PROCESSING = "data_processing"
@@ -168,7 +167,7 @@ class FieldSpec:
     """One type-specific field, described well enough to build a form from.
 
     The user interface is generated from these rather than hand-written per
-    type, which is what stops a ninth workload type from needing its own page.
+    type, which is what stops an eighth workload type from needing its own page.
     """
 
     key: str
@@ -221,11 +220,6 @@ class WorkloadDefinition:
     description: str
     default_work_unit: str
     fields: tuple[FieldSpec, ...] = ()
-    #: Continuous revenue-earning work with no completion deadline. Mining is
-    #: the only one today. It needs different optimisation logic entirely —
-    #: see `core/mining.py` — because there is no "finish by" to schedule
-    #: against, only an hour-by-hour decision about whether running pays.
-    continuous: bool = False
     default_flexibility: Flexibility = field(default_factory=Flexibility)
 
     def validate_fields(self, values: dict | None) -> dict:
@@ -291,36 +285,6 @@ DEFINITIONS: dict[WorkloadType, WorkloadDefinition] = {
             _f("latency_target_ms", "Latency target", "ms", minimum=0,
                help="Leave empty for offline batch. A tight target means the "
                     "work is arrival-driven and is not shiftable."),
-        ),
-    ),
-    WorkloadType.MINING: WorkloadDefinition(
-        type=WorkloadType.MINING,
-        label="Bitcoin / proof-of-work mining",
-        description="Continuous, interruptible, revenue-earning. Has no "
-                    "completion deadline, so it is not scheduled — it is "
-                    "dispatched hour by hour on whether revenue beats cost.",
-        default_work_unit="terahashes",
-        continuous=True,
-        default_flexibility=Flexibility(
-            pausable=True, interruptible=True, parallelisable=True,
-            max_parallel_units=10000),
-        fields=(
-            _f("miner_model", "Miner model", kind="text",
-               help="Recorded for the audit trail; not used in the maths."),
-            _f("hash_rate_th_s", "Available hash rate", "TH/s", minimum=0.001,
-               required=True),
-            _f("efficiency_j_per_th", "Efficiency", "J/TH", minimum=0.001,
-               required=True,
-               help="Joules per terahash. With hash rate this fixes power "
-                    "draw exactly, so no separate power figure is needed."),
-            _f("revenue_per_th_day", "Revenue", "currency per TH/s per day",
-               minimum=0, required=True,
-               help="Operator-supplied. Depends on network difficulty and "
-                    "coin price, which this project does not fetch."),
-            _f("curtailable", "Can curtail on demand", kind="boolean",
-               default=True),
-            _f("opex_per_hour", "Non-energy operating cost", "currency/hour",
-               minimum=0, default=0.0),
         ),
     ),
     WorkloadType.RENDERING: WorkloadDefinition(
@@ -432,7 +396,6 @@ def catalogue() -> list[dict]:
             "label": entry.label,
             "description": entry.description,
             "work_unit": entry.default_work_unit,
-            "continuous": entry.continuous,
             "fields": [
                 {"key": spec.key, "label": spec.label, "unit": spec.unit,
                  "kind": spec.kind, "required": spec.required,
@@ -512,16 +475,6 @@ class WorkloadSpec:
         return definition(self.type)
 
     @property
-    def continuous(self) -> bool:
-        """Revenue-earning work with no completion deadline.
-
-        Kept as a property rather than a field so it cannot drift from the
-        type's own definition — mining is continuous because mining is
-        continuous, not because someone ticked a box.
-        """
-        return self.definition.continuous
-
-    @property
     def energy_kwh(self) -> float:
         return self.power_kw * self.duration_hours
 
@@ -559,7 +512,6 @@ class WorkloadSpec:
             "work_amount": self.work_amount,
             "work_unit": self.work_unit,
             "priority": self.priority,
-            "continuous": self.continuous,
             "slack_hours": (None if math.isinf(self.slack_hours())
                             else round(self.slack_hours(), 3)),
             "splittable": self.flexibility.splittable,
@@ -573,26 +525,6 @@ class WorkloadSpec:
 #: supply it" — the deriver refuses rather than inventing a number, which is
 #: the same rule the rest of this project follows.
 Deriver = Callable[[dict, "ResourceRequest"], dict]
-
-
-def _derive_mining(attributes: dict, resources: ResourceRequest) -> dict:
-    """Hash rate and J/TH fix power exactly, so nothing is estimated.
-
-    This is the one type where power is *known* rather than guessed: a miner's
-    efficiency in joules per terahash multiplied by its hash rate in terahashes
-    per second is watts, by definition. No form field can improve on that, so
-    a user-supplied power figure is ignored in favour of the physics.
-    """
-    hash_rate = attributes.get("hash_rate_th_s") or 0.0
-    efficiency = attributes.get("efficiency_j_per_th") or 0.0
-    watts = hash_rate * efficiency          # TH/s * J/TH = J/s = W
-    return {
-        "power_kw": watts / 1000 if watts > 0 else None,
-        "duration_hours": None,             # continuous: caller sets the window
-        "work_amount": hash_rate * 3600 if hash_rate > 0 else None,
-        "work_unit": "terahashes",
-        "provenance": "SPEC",               # from the miner's datasheet
-    }
 
 
 def _derive_rendering(attributes: dict, resources: ResourceRequest) -> dict:
@@ -648,7 +580,6 @@ def _derive_custom(attributes: dict, resources: ResourceRequest) -> dict:
 
 
 DERIVERS: dict[WorkloadType, Deriver] = {
-    WorkloadType.MINING: _derive_mining,
     WorkloadType.RENDERING: _derive_rendering,
     WorkloadType.HPC: _derive_hpc,
     WorkloadType.DATA_PROCESSING: _derive_data_processing,
@@ -679,9 +610,7 @@ def build(workload_id: str, name: str, workload_type: WorkloadType | str,
           provenance: str = "ESTIMATED") -> WorkloadSpec:
     """Validate a workload of any type and fill in what its type can derive.
 
-    Explicit arguments always win over derived ones — except mining power,
-    which is fixed by physics and where a typed-in figure would be strictly
-    worse than the datasheet calculation.
+    Explicit arguments always win over derived ones.
 
     Refuses rather than defaults. A workload with no duration and no way to
     derive one is not given "1 hour"; it is rejected with the reason, because
@@ -706,12 +635,7 @@ def build(workload_id: str, name: str, workload_type: WorkloadType | str,
         derived = {k: v for k, v in deriver(validated, resources).items()
                    if v is not None}
 
-    # Mining power is physics, not preference.
-    if resolved_type is WorkloadType.MINING and "power_kw" in derived:
-        power_kw = derived["power_kw"]
-        provenance = derived.get("provenance", provenance)
-    else:
-        power_kw = power_kw if power_kw is not None else derived.get("power_kw")
+    power_kw = power_kw if power_kw is not None else derived.get("power_kw")
 
     duration_hours = (duration_hours if duration_hours is not None
                       else derived.get("duration_hours"))
@@ -731,11 +655,6 @@ def build(workload_id: str, name: str, workload_type: WorkloadType | str,
             f"{spec_definition.label} needs an estimated power draw in kW. "
             f"Nothing here can infer it, and guessing it would make every "
             f"cost and carbon figure downstream meaningless.")
-
-    if spec_definition.continuous and deadline is None:
-        # A continuous workload has no completion deadline by nature. It still
-        # needs a window to be evaluated over, which the caller supplies.
-        deadline = earliest_start + timedelta(hours=duration_hours)
 
     return WorkloadSpec(
         workload_id=workload_id, name=name, type=resolved_type,
@@ -785,22 +704,9 @@ def to_planning_candidates(spec: WorkloadSpec, placements) -> tuple:
 
 
 def to_portfolio_job(spec: WorkloadSpec, candidates):
-    """Turn one workload into the `PortfolioJob` the multi-job scheduler takes.
-
-    Continuous workloads are refused here on purpose. `core/portfolio.py`
-    schedules work that finishes by a deadline and maximises operator utility;
-    mining has neither property. Forcing it through this path would produce a
-    schedule that looks valid and answers the wrong question. Use
-    `core/mining.py` instead.
-    """
+    """Turn one workload into the `PortfolioJob` the multi-job scheduler takes."""
     from core.portfolio import PortfolioJob
 
-    if spec.continuous:
-        raise WorkloadRefused(
-            f"{spec.definition.label} is continuous revenue-earning work with "
-            f"no completion deadline, so the deadline-based portfolio "
-            f"scheduler is the wrong tool. Use core.mining.dispatch, which "
-            f"compares revenue against cost per interval instead.")
     if spec.deadline is None:
         raise WorkloadRefused(
             f"{spec.name} has no deadline, so there is no window to schedule "

@@ -15,18 +15,10 @@ from core import workload_types as wt
 NOW = datetime(2026, 9, 1, tzinfo=timezone.utc)
 
 
-def _mining(**overrides):
-    attributes = {"hash_rate_th_s": 100.0, "efficiency_j_per_th": 21.5,
-                  "revenue_per_th_day": 0.05}
-    attributes.update(overrides.pop("attributes", {}))
-    return wt.build("m1", "Rig", wt.WorkloadType.MINING, NOW,
-                    duration_hours=24, attributes=attributes, **overrides)
-
-
 # --- The registry itself ---
 
 def test_every_requested_workload_type_exists():
-    expected = {"ai_training", "ai_inference", "mining", "rendering", "hpc",
+    expected = {"ai_training", "ai_inference", "rendering", "hpc",
                 "data_processing", "batch", "custom"}
     assert {t.value for t in wt.WorkloadType} == expected
 
@@ -43,17 +35,13 @@ def test_the_catalogue_is_shaped_for_a_selector():
     assert len(entries) == len(wt.WorkloadType)
     for entry in entries:
         assert {"type", "label", "description", "work_unit",
-                "continuous", "fields"} <= set(entry)
+                "fields"} <= set(entry)
 
 
 def test_an_unknown_type_is_refused_with_the_known_ones_named():
     with pytest.raises(ValueError, match="unknown workload type"):
         wt.definition("quantum_annealing")
 
-
-def test_only_mining_is_continuous():
-    continuous = {t for t in wt.WorkloadType if wt.DEFINITIONS[t].continuous}
-    assert continuous == {wt.WorkloadType.MINING}
 
 
 # --- Type-specific fields are validated, not trusted ---
@@ -79,17 +67,6 @@ def test_a_field_below_its_minimum_is_refused():
 
 # --- Derivation: duration and power come from the type's own fields ---
 
-def test_mining_power_is_physics_not_an_estimate():
-    """TH/s x J/TH = watts, by definition. 100 x 21.5 = 2150 W."""
-    spec = _mining()
-    assert spec.power_kw == pytest.approx(2.15)
-    assert spec.provenance == "SPEC"
-
-
-def test_a_typed_in_power_cannot_override_the_miner_datasheet():
-    """Anywhere else the caller wins. Here the physics is strictly better."""
-    spec = _mining(power_kw=99.0)
-    assert spec.power_kw == pytest.approx(2.15)
 
 
 def test_rendering_duration_divides_by_the_parallel_workers():
@@ -195,12 +172,6 @@ def test_a_resource_range_that_inverts_is_refused():
 
 
 # --- Compiling down to the existing scheduler ---
-
-def test_mining_is_refused_by_the_deadline_scheduler_and_told_where_to_go():
-    """Continuous work through a deadline scheduler produces a valid-looking
-    answer to a question nobody asked."""
-    with pytest.raises(wt.WorkloadRefused, match="core.mining"):
-        wt.to_portfolio_job(_mining(), ())
 
 
 def test_work_that_cannot_finish_in_time_is_refused_before_scheduling():
