@@ -1,5 +1,5 @@
 """
-On-site renewable output, and how much of a load it can actually cover.
+On-site renewable output from weather: solar and wind capacity factors.
 
 **Why this is built rather than called out to.** Renewables.ninja is the
 reference tool for this and it is genuinely better modelled: MERRA-2/SARAH
@@ -27,12 +27,12 @@ The output that actually matters is not generation, it is **matching**: for
 each half-hour, how much of the load on-site renewables could serve, and how
 much has to come off the grid. Averages hide this completely — a site can be
 "100% renewable on an annual average" while importing fossil power every
-night. Matching is computed per settlement period for that reason.
+night. That matching is done per settlement period by the dispatch in
+`core/energy.py`, using the capacity factors computed here.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 
 # --- PV -------------------------------------------------------------------
 #: Standard test condition irradiance, W/m2.
@@ -96,110 +96,3 @@ class SiteCapacity:
         return self.solar_kw + self.wind_kw
 
 
-@dataclass
-class Interval:
-    """One settlement period of supply against demand."""
-
-    timestamp: datetime
-    demand_kw: float
-    solar_kw: float
-    wind_kw: float
-
-    @property
-    def available_kw(self) -> float:
-        return self.solar_kw + self.wind_kw
-
-    @property
-    def matched_kw(self) -> float:
-        """On-site generation actually consumed — never more than demand."""
-        return min(self.available_kw, self.demand_kw)
-
-    @property
-    def imported_kw(self) -> float:
-        """Load that must be offloaded to the grid."""
-        return max(0.0, self.demand_kw - self.available_kw)
-
-    @property
-    def curtailed_kw(self) -> float:
-        """Generation with nowhere to go — exported or spilled."""
-        return max(0.0, self.available_kw - self.demand_kw)
-
-
-@dataclass
-class MatchResult:
-    """How well a site's own generation covered its load."""
-
-    intervals: list[Interval] = field(default_factory=list)
-    period_hours: float = 0.5
-
-    def _sum(self, attr: str) -> float:
-        return sum(getattr(i, attr) for i in self.intervals) * self.period_hours
-
-    @property
-    def demand_kwh(self) -> float:
-        return self._sum("demand_kw")
-
-    @property
-    def matched_kwh(self) -> float:
-        return self._sum("matched_kw")
-
-    @property
-    def imported_kwh(self) -> float:
-        return self._sum("imported_kw")
-
-    @property
-    def curtailed_kwh(self) -> float:
-        return self._sum("curtailed_kw")
-
-    @property
-    def hourly_matched_pct(self) -> float:
-        """Share of demand met on-site **period by period**.
-
-        This is the honest number. An annual-average figure can read 100%
-        while the site imports fossil power every night; matching each
-        half-hour separately is what 24/7 carbon-free accounting means, and it
-        is always the lower, less flattering figure.
-        """
-        return 0.0 if not self.demand_kwh else self.matched_kwh / self.demand_kwh * 100.0
-
-    @property
-    def annual_style_pct(self) -> float:
-        """Generation as a share of demand, ignoring *when* it arrived.
-
-        Reported only so the two can be shown side by side. The gap between
-        this and ``hourly_matched_pct`` is exactly the claim that netting-off
-        annual totals conceals.
-        """
-        generated = self._sum("available_kw")
-        return 0.0 if not self.demand_kwh else min(generated / self.demand_kwh * 100.0, 1e6)
-
-    @property
-    def fully_covered_periods(self) -> int:
-        return sum(1 for i in self.intervals if i.imported_kw <= 1e-9)
-
-
-def match_load(
-    weather: list,
-    capacity: SiteCapacity,
-    demand_kw: float,
-    *,
-    period_hours: float = 0.5,
-) -> MatchResult:
-    """Match a constant load against on-site generation, period by period.
-
-    ``weather`` is a list of objects exposing ``timestamp``,
-    ``solar_radiation_wm2``, ``wind_speed_100m_ms`` and ``temperature_c`` —
-    i.e. what ``adapters.weather.WeatherAdapter`` returns.
-    """
-    intervals = [
-        Interval(
-            timestamp=w.timestamp,
-            demand_kw=demand_kw,
-            solar_kw=capacity.solar_kw * solar_capacity_factor(
-                getattr(w, "solar_radiation_wm2", None), getattr(w, "temperature_c", None)),
-            wind_kw=capacity.wind_kw * wind_capacity_factor(
-                getattr(w, "wind_speed_100m_ms", None)),
-        )
-        for w in weather
-    ]
-    return MatchResult(intervals=intervals, period_hours=period_hours)

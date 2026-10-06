@@ -206,20 +206,11 @@ _DEVICES = [
 
 CATALOGUE: dict[str, Device] = {d.key: d for d in _DEVICES}
 
-MEMORY_TYPES = ["HBM3e", "HBM3", "HBM2e", "HBM2", "HBM", "GDDR7", "GDDR6X",
-                "GDDR6", "LPDDR5X", "LPDDR5", "LPDDR4X", "DDR5"]
-
-TIERS = ["Datacentre", "Professional", "Workstation", "Consumer", "Server"]
-
 
 def get(key: str) -> Device:
     if key not in CATALOGUE:
         raise KeyError(f"unknown device {key!r}. Known: {', '.join(sorted(CATALOGUE))}")
     return CATALOGUE[key]
-
-
-def by_vendor(vendor: str) -> list[Device]:
-    return [d for d in CATALOGUE.values() if d.vendor.lower() == vendor.lower()]
 
 
 def vendors() -> list[str]:

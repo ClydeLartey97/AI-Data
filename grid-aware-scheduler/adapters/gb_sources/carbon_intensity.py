@@ -106,30 +106,6 @@ class CarbonIntensityClient:
         raise last_error
 
 
-def fetch_current_intensity(*, client: CarbonIntensityClient | None = None) -> dict:
-    """Latest national carbon intensity reading (gCO2/kWh).
-
-    Returns a dict with ``actual`` and ``forecast`` intensities, the qualitative
-    ``index`` (e.g. "low"/"moderate"/"high"), and the period ``start``/``end``.
-    ``actual`` is ``None`` for the current period until it settles; callers
-    should fall back to ``forecast``. Returns an empty dict if nothing is
-    published.
-    """
-    client = client or CarbonIntensityClient()
-    rows = client.get("intensity").get("data", [])
-    if not rows:
-        return {}
-    latest = rows[-1]
-    intensity = latest.get("intensity", {})
-    return {
-        "start": latest.get("from"),
-        "end": latest.get("to"),
-        "actual": intensity.get("actual"),
-        "forecast": intensity.get("forecast"),
-        "index": intensity.get("index"),
-    }
-
-
 def fetch_intensity_for_date(
     settlement_date: date, *, client: CarbonIntensityClient | None = None
 ) -> pd.DataFrame:

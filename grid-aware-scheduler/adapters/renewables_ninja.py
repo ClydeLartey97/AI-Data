@@ -35,7 +35,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import requests
@@ -89,11 +89,6 @@ class SimulatedPoint:
 
     timestamp: datetime
     capacity_factor: float
-
-
-def has_token() -> bool:
-    secrets.load_env_file()
-    return bool(os.environ.get(TOKEN_ENV_VAR))
 
 
 def usage() -> dict:

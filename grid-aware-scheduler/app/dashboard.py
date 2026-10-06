@@ -32,7 +32,7 @@ from app.panels import (EXPAND_JS, PANEL_CSS, duration_panel, profile_panel,
                         savings_panel, scatter_panel)
 from app.theme import THEME_BOOTSTRAP, THEME_CONTROL, THEME_CSS, product_nav
 from app.chart import CHART_CSS, Band, ChartSeries, chart
-from core.grid import Job, cheapest_window, cleanest_window, compare, run_immediately
+from core.grid import Job, cleanest_window, compare
 
 if TYPE_CHECKING:
     from app.markets import MarketContext
@@ -51,94 +51,6 @@ PRICE_LIGHT, PRICE_DARK = "#007AFF", "#0A84FF"     # blue
 # --------------------------------------------------------------------------
 # chart rendering
 # --------------------------------------------------------------------------
-
-def _svg_chart(
-    series: list[GridDataPoint],
-    values: list[float | None],
-    *,
-    unit: str,
-    label: str,
-    var: str,
-    highlight: tuple[int, int] | None,
-) -> str:
-    """One single-series area+line chart, as inline SVG.
-
-    Single series by design: carbon and price are different measures on
-    different scales, so they get their own charts rather than a dual axis —
-    the single most common way a chart like this goes wrong.
-    """
-    w, h = 1000.0, 260.0
-    pad_l, pad_r, pad_t, pad_b = 8.0, 8.0, 22.0, 26.0
-    pts = [(i, v) for i, v in enumerate(values) if v is not None]
-    if not pts:
-        return '<p class="empty">No data for this window.</p>'
-
-    lo = min(v for _, v in pts)
-    hi = max(v for _, v in pts)
-    span = (hi - lo) or 1.0
-    lo_pad, hi_pad = lo - span * 0.12, hi + span * 0.12
-    span_pad = hi_pad - lo_pad
-
-    n = len(values)
-    def x(i: float) -> float:
-        return pad_l + (w - pad_l - pad_r) * (i / max(n - 1, 1))
-    def y(v: float) -> float:
-        return pad_t + (h - pad_t - pad_b) * (1 - (v - lo_pad) / span_pad)
-
-    line = " ".join(f"{'M' if k == 0 else 'L'}{x(i):.1f},{y(v):.1f}"
-                    for k, (i, v) in enumerate(pts))
-    area = (f"M{x(pts[0][0]):.1f},{y(lo_pad):.1f} "
-            + " ".join(f"L{x(i):.1f},{y(v):.1f}" for i, v in pts)
-            + f" L{x(pts[-1][0]):.1f},{y(lo_pad):.1f} Z")
-
-    band = ""
-    if highlight:
-        a, b = highlight
-        band = (f'<rect class="band" x="{x(a):.1f}" y="{pad_t - 6:.1f}" '
-                f'width="{max(x(b) - x(a), 2):.1f}" height="{h - pad_t - pad_b + 12:.1f}" '
-                f'rx="6"/>')
-
-    # Gridlines + value labels at the REAL min / mid / max of the data — never
-    # at the padded bounds. Labelling the padding invents values the series
-    # never takes (it put "-16" under a price series whose floor was £2.84).
-    grid, ticks = [], []
-    for v in (lo, (lo + hi) / 2, hi):
-        yy = y(v)
-        grid.append(f'<line class="grid" x1="{pad_l}" y1="{yy:.1f}" x2="{w - pad_r}" y2="{yy:.1f}"/>')
-        ticks.append(f'<text class="tick" x="{pad_l + 2}" y="{yy - 5:.1f}">{v:,.0f}</text>')
-
-    # Time axis: one label per day boundary, plus first and last.
-    time_labels = []
-    for i, p in enumerate(series):
-        if p.timestamp.hour == 0 and p.timestamp.minute == 0:
-            time_labels.append(
-                f'<text class="tlab" x="{x(i):.1f}" y="{h - 6:.1f}" text-anchor="middle">'
-                f'{html.escape(p.timestamp.strftime("%a %d"))}</text>')
-
-    payload = ";".join(
-        f"{x(i):.1f},{y(v):.1f},{html.escape(series[i].timestamp.strftime('%a %d %b %H:%M'))},{v:.2f}"
-        for i, v in pts)
-
-    return f"""
-<figure class="chart" style="--series: var({var});">
-  <figcaption class="sr-only">{html.escape(label)}, {html.escape(unit)}</figcaption>
-  <svg viewBox="0 0 {w:.0f} {h:.0f}" preserveAspectRatio="none" role="img"
-       aria-label="{html.escape(label)} over time, in {html.escape(unit)}"
-       data-points="{payload}">
-    {''.join(grid)}
-    {band}
-    <path class="area" d="{area}"/>
-    <path class="line" d="{line}"/>
-    <g class="hover" hidden>
-      <line class="cross" y1="{pad_t - 6:.1f}" y2="{h - pad_b + 6:.1f}"/>
-      <circle class="dot" r="4.5"/>
-    </g>
-    {''.join(ticks)}
-    {''.join(time_labels)}
-  </svg>
-  <div class="tip" hidden></div>
-</figure>"""
-
 
 # --------------------------------------------------------------------------
 # page
@@ -234,7 +146,6 @@ def _regions_card() -> str:
     if not live:
         return ""
     lo, hi = min(live, key=lambda r: r.carbon_forecast), max(live, key=lambda r: r.carbon_forecast)
-    spread = (hi.carbon_forecast / lo.carbon_forecast) if lo.carbon_forecast else None
     worst = max(r.carbon_forecast for r in live) or 1
 
     rows = []

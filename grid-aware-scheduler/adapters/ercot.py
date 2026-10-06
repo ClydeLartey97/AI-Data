@@ -64,8 +64,6 @@ DOWNLOAD_URL = ("https://www.ercot.com/misdownload/servlets/mirDownload"
 #: DAM Settlement Point Prices — one CSV per operating day, posted the day
 #: before delivery once the day-ahead market clears.
 DAM_SPP_REPORT = 12331
-#: Historical DAM Load Zone and Hub Prices — annual XLSX archives.
-HISTORICAL_REPORT = 13060
 
 #: Central Prevailing Time. ERCOT observes daylight saving, so this is a real
 #: zone rather than the fixed offset MISO's files use.
@@ -275,15 +273,6 @@ class ERCOTAdapter(MarketAdapter):
         """Posting dates and ids for the day-ahead files currently listed."""
         listing = self._get(REPORT_LIST_URL.format(report=DAM_SPP_REPORT))
         return _parse_listing(listing.text)
-
-    def historical_archives(self) -> list[tuple[date, str]]:
-        """Annual XLSX price archives, for a backfill willing to read XLSX.
-
-        Returned rather than fetched: parsing them needs a dependency this
-        project does not carry, so the decision belongs to the caller.
-        """
-        listing = self._get(REPORT_LIST_URL.format(report=HISTORICAL_REPORT))
-        return _parse_listing(listing.text, suffix=".zip")
 
     def _prices(self, start: datetime, end: datetime) -> dict[datetime, float]:
         wanted = set(_delivery_dates(start, end))

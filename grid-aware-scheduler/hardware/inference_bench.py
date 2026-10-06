@@ -47,14 +47,6 @@ class ModelUnavailable(RuntimeError):
 
 
 @dataclass(frozen=True)
-class PhaseMeasurement:
-    phase: str                 # "prefill" | "decode"
-    tokens: int
-    tokens_per_second: float
-    seconds: float
-
-
-@dataclass(frozen=True)
 class InferenceRun:
     model_id: str
     revision: str | None
