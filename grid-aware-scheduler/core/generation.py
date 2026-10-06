@@ -96,7 +96,7 @@ def weather_capacity_factor(kind: str, point: Any) -> float | None:
         # Availability, not output. A dispatchable machine can deliver close
         # to nameplate whenever it is running; hot air is the one physical
         # reason it cannot. Whether it *should* run is a carbon question,
-        # answered in core.supply_advice, not a forecast question.
+        # answered by dispatch in core.energy, not a forecast question.
         return turbine_temperature_factor(getattr(point, "temperature_c", None))
     return None
 

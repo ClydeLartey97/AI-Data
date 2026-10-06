@@ -32,7 +32,6 @@ re-testing for correctness: it sees the same contract it always did.
 ```
 core/workload_types.py   types, fields, flexibility, resources, compilers
 core/objectives.py       named objectives -> planner weights, or a refusal
-core/orchestration.py    the seven-step flow and the counterfactual
 ```
 
 ### Adding an eighth workload type
