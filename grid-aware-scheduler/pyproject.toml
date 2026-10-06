@@ -37,10 +37,8 @@ grid-aware-scheduler = "app.serve:main"
 Repository = "https://github.com/ClydeLartey97/AI-Data"
 
 [tool.setuptools]
-packages = ["adapters", "app", "core", "hardware"]
+packages = ["adapters", "adapters.gb_sources", "adapters.gb_sources.elexon",
+            "app", "core", "hardware"]
 
 [tool.setuptools.dynamic]
 version = { attr = "app.api.PRODUCT_VERSION" }
-
-[tool.setuptools.package-data]
-app = ["static/vendor/*.js"]

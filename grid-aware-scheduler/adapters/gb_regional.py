@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from adapters import national_grid_tool
+from adapters.gb_sources.carbon_intensity import CarbonIntensityClient
 
 #: The Carbon Intensity API's own banding. Kept as published rather than
 #: rebucketed, so the UI reports the operator's judgement, not ours.
@@ -106,17 +106,14 @@ class GBRegionalAdapter:
     def __init__(self, client: object | None = None, *,
                  timeout_seconds: float = 30.0,
                  max_attempts: int = 3) -> None:
-        # Built on first request, not here: constructing an adapter must not
-        # require the National Grid Tool on a machine that only plans US
-        # markets. ``client`` is a CarbonIntensityClient when supplied.
+        # Built on first request, not here. ``client`` is a
+        # CarbonIntensityClient when supplied.
         self._client = client
         self._timeout_seconds = timeout_seconds
         self._max_attempts = max_attempts
 
     def _get(self, path: str) -> dict:
         if self._client is None:
-            CarbonIntensityClient, = national_grid_tool.load(
-                "sources.carbon_intensity.client", "CarbonIntensityClient")
             self._client = CarbonIntensityClient(
                 timeout_seconds=self._timeout_seconds,
                 max_attempts=self._max_attempts,

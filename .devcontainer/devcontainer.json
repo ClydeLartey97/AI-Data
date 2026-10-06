@@ -32,13 +32,5 @@
         "python.analysis.extraPaths": ["grid-aware-scheduler"]
       }
     }
-  },
-
-  "remoteEnv": {
-    // The GB adapter imports a sibling checkout that is not in this repository
-    // and never will be. Pointing this at a path that does not exist is honest
-    // rather than broken: the deferred import raises a message naming this
-    // variable, and CAISO, NYISO, MISO and ERCOT are entirely unaffected.
-    "NATIONAL_GRID_TOOL_PATH": "/workspaces/National-Grid-Tool"
   }
 }

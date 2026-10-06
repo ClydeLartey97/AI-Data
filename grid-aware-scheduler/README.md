@@ -36,13 +36,8 @@ python3 -m venv .venv
 ```
 
 Three dependencies — `pandas`, `requests`, `psutil`. Everything else is
-standard library. **CAISO, NYISO, MISO and ERCOT work immediately**: each
-talks to its market operator directly and none needs an API key.
-
-GB is the one exception. Its price and carbon come through a sibling checkout
-of an earlier power-market data project, so that import is deferred to the
-first GB fetch — a machine planning only US markets never needs the folder.
-Point `NATIONAL_GRID_TOOL_PATH` at it to enable GB.
+standard library. **All five markets work immediately**: each talks to its
+market operator directly and none needs an API key.
 
 Apple-silicon measurement is optional and separate (`pip install '.[apple]'`,
 which pulls MLX). It is needed only to *produce* `MEASURED` profiles. Planning

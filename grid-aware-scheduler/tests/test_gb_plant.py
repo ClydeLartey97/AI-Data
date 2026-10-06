@@ -77,15 +77,14 @@ def test_the_settlement_day_window_is_widened_past_the_utc_day(monkeypatch):
         asked.append(day)
         return pd.DataFrame()
 
-    monkeypatch.setattr(gb_plant.national_grid_tool, "load",
-                        lambda *a, **k: (fake,))
+    monkeypatch.setattr(gb_plant, "fetch_physical", fake)
     stamps = [datetime(2026, 8, 20, 23, 30, tzinfo=UTC)]
     gb_plant.availability_by_timestamp("T_SIZB-1", stamps)
     assert stamps[0].date() + timedelta(days=1) in asked
 
 
 def test_no_timestamps_makes_no_request(monkeypatch):
-    monkeypatch.setattr(gb_plant.national_grid_tool, "load",
+    monkeypatch.setattr(gb_plant, "fetch_physical",
                         lambda *a, **k: pytest.fail("should not fetch"))
     assert gb_plant.availability_by_timestamp("T_SIZB-1", []) == {}
 

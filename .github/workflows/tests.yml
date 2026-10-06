@@ -36,10 +36,6 @@ jobs:
 
       - name: Tests
         working-directory: grid-aware-scheduler
-        env:
-          # Absent on a runner, and meant to be. The GB adapter must fail with
-          # a message naming this variable rather than taking the server down.
-          NATIONAL_GRID_TOOL_PATH: /nonexistent
         run: python -m pytest tests -q
 
       - name: No AI co-author trailers reached history

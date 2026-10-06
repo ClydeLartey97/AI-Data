@@ -16,7 +16,7 @@ It is **market-agnostic** by construction: the scheduling logic never touches ma
 
 #### What is built
 
-- **Five market adapters**, all against official public sources and none needing an API key: GB (national price, 18 regional carbon zones), CAISO (nodal LMP), NYISO (11 zonal LBMP), MISO (8 hub LMP), ERCOT (hub and load-zone day-ahead settlement point prices). US carbon comes from EIA-930 and is labelled balancing-area scope — never presented as nodal. GB reads through a sibling data project that must be checked out beside this one; the four US markets need nothing else.
+- **Five market adapters**, all against official public sources and none needing an API key: GB (national price, 18 regional carbon zones), CAISO (nodal LMP), NYISO (11 zonal LBMP), MISO (8 hub LMP), ERCOT (hub and load-zone day-ahead settlement point prices). US carbon comes from EIA-930 and is labelled balancing-area scope — never presented as nodal.
 - **An exact placement engine.** It enumerates every feasible hardware/location/start combination under hard memory, deadline, capacity, cost and carbon constraints, applies PUE, and marks the cost/carbon Pareto frontier. No solver, no opaque model — the decision is auditable and runs in microseconds.
 - **A multi-job portfolio scheduler** with workflow stage dependencies, checkpoint splitting and facility power limits.
 - **A local operator product** — six linked pages plus a versioned JSON API, served by a local process bound to loopback. Every planning decision can be persisted with its complete decision-time signal snapshot and later scored against realised outturn.

@@ -26,9 +26,7 @@ would have caught it.
 
 This is GB-only, and deliberately so. It rests on Elexon's per-BM-unit balancing
 data, which exists because GB runs a central balancing mechanism; the US ISOs
-publish plant-level output far more coarsely and mostly after the fact. The
-import is deferred through `adapters.national_grid_tool`, so a US-market install
-never touches it.
+publish plant-level output far more coarsely and mostly after the fact.
 
 **Identity is the BM Unit id, not the coordinates.** A latitude and longitude
 locate a plant well enough to fetch its weather, but two units at one station
@@ -40,7 +38,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
-from adapters import national_grid_tool
+from adapters.gb_sources.elexon.generation import fetch_actual_generation_per_unit
+from adapters.gb_sources.elexon.physical import fetch_physical
 
 #: Elexon's per-unit physical datasets this module reads.
 AVAILABILITY_DATASET = "MELS"   # what the unit *can* export
@@ -97,8 +96,6 @@ def fetch_plant(bm_unit: str, start: date, end: date, *,
     "the unit declared itself unavailable" are different statements, and only
     the second is an outage.
     """
-    fetch_physical, = national_grid_tool.load(
-        "sources.elexon.physical", "fetch_physical")
 
     availability: dict[datetime, float] = {}
     intended: dict[datetime, float] = {}
@@ -140,13 +137,11 @@ def fetch_actual_output(bm_unit: str, day: date) -> dict[datetime, float]:
     request per period. Periods that are not published come back empty and are
     simply absent from the result.
     """
-    fetch_per_unit, = national_grid_tool.load(
-        "sources.elexon.generation", "fetch_actual_generation_per_unit")
 
     out: dict[datetime, float] = {}
     for period in range(1, _PERIODS + 1):
         try:
-            frame = fetch_per_unit(day, period, bm_unit=bm_unit)
+            frame = fetch_actual_generation_per_unit(day, period, bm_unit=bm_unit)
         except Exception:  # noqa: BLE001 - one bad period must not lose a day
             continue
         if frame is None or len(frame) == 0:

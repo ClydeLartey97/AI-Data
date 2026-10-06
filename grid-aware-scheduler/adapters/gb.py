@@ -30,8 +30,9 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 
-from adapters import national_grid_tool
 from adapters.base_adapter import GridDataPoint, MarketAdapter
+from adapters.gb_sources.carbon_intensity import fetch_intensity_for_date
+from adapters.gb_sources.elexon.prices import fetch_market_index_range
 
 # Elexon's MID endpoint caps its window at 7 days and widens it a day either
 # side, so callers must keep each request to <=5 days.
@@ -58,8 +59,6 @@ class GBPoint(GridDataPoint):
 
 
 def _fetch_carbon_range(start_date: date, end_date: date) -> pd.DataFrame:
-    fetch_intensity_for_date, = national_grid_tool.load(
-        "sources.carbon_intensity.client", "fetch_intensity_for_date")
     frames, day = [], start_date
     while day <= end_date:
         frames.append(fetch_intensity_for_date(day))
@@ -68,8 +67,6 @@ def _fetch_carbon_range(start_date: date, end_date: date) -> pd.DataFrame:
 
 
 def _fetch_price_range(start_date: date, end_date: date) -> pd.DataFrame:
-    fetch_market_index_range, = national_grid_tool.load(
-        "sources.elexon.prices", "fetch_market_index_range")
     frames, day = [], start_date
     while day <= end_date:
         chunk_end = min(day + timedelta(days=_MID_CHUNK_DAYS - 1), end_date)
