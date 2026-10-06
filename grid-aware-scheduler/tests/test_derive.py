@@ -413,3 +413,26 @@ def test_cpu_cores_are_recorded_but_never_scaled():
     for device in derive_module.derive_family(derive_module.MEASURED_M2).values():
         assert "performance_cores" not in device.public_dict()
         assert "efficiency_cores" not in device.public_dict()
+
+
+# --- the anchor is the committed runs, not a typed-in number ----------------
+
+def test_the_m2_anchor_is_the_median_of_the_committed_runs():
+    """MEASURED_M2 must be reproducible from the three raw runs in the repo."""
+    import json
+    import statistics
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "benchmarks" / "data" / "m2_baseline_runs.json"
+    runs = json.loads(path.read_text())["runs"]
+    assert len(runs) == 3 and all(r["validated"] for r in runs)
+
+    def rates(name, dtype, size=None):
+        return [m["rate"] for r in runs for m in r["payload"]["measurements"]
+                if m["name"] == name and m["dtype"] == dtype
+                and (size is None or m["size"] == size)]
+
+    gemm = statistics.median(rates("gemm", "float16", 2048))
+    bandwidth = statistics.median(rates("memory_bandwidth", "float32"))
+    assert MEASURED_M2.gemm_fp16_gflops == pytest.approx(gemm, abs=0.05)
+    assert MEASURED_M2.memory_bandwidth_gbs == pytest.approx(bandwidth, abs=0.05)

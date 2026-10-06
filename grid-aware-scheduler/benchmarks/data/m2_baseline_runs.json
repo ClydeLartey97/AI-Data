@@ -1,0 +1,416 @@
+{
+  "source": "data/cache/baselines.sqlite, exported unchanged",
+  "runs": [
+    {
+      "run_id": 1,
+      "device": "Apple M2",
+      "stack": "python-3.12.9_macos-26.1_mlx-0.32.0_mlx-lm-0.31.3_coremltools-9.0",
+      "observed_at": "2026-08-11T22:16:38.188969+00:00",
+      "recorded_at": "2026-08-11T22:16:38.713277+00:00",
+      "validated": true,
+      "payload": {
+        "context": {
+          "battery": {
+            "available": true,
+            "charge_mah": 3097.0,
+            "cycle_count": 795.0,
+            "energy_integration_possible": false,
+            "energy_remaining_wh": 39.908,
+            "full_charge_mah": 3600.0,
+            "is_charging": true,
+            "on_ac_power": true,
+            "temperature_c": 30.5,
+            "voltage_v": 12.89
+          },
+          "captured_at": "2026-08-11T22:16:38.176004+00:00",
+          "cpu_percent_at_start": 20.1,
+          "device": "Apple M2",
+          "gpu_percent_at_start": 0.0,
+          "low_power_mode": false,
+          "memory_available_gb": 2.42,
+          "platform": "macOS-26.1",
+          "power_source": "ac",
+          "static": {
+            "cpu_cores": 8,
+            "gpu_cores": 8,
+            "memory_total_gb": 8.0,
+            "storage_total_gb": 228.27
+          },
+          "storage_free_gb": 21.06,
+          "swap_used_gb": 0.72
+        },
+        "device": "Apple M2",
+        "measurements": [
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 376.8504287682451,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0007123129907995462,
+            "seconds_relative_mad": 0.06890332495903556,
+            "size": 512
+          },
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 730.35376538419,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0029403335065580904,
+            "seconds_relative_mad": 0.0875360869705943,
+            "size": 1024
+          },
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 2294.8883507071855,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0074861459725070745,
+            "seconds_relative_mad": 0.01033562144176795,
+            "size": 2048
+          },
+          {
+            "dtype": "float16",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 798.4694415185436,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0003361875133123249,
+            "seconds_relative_mad": 0.01001520265008789,
+            "size": 512
+          },
+          {
+            "dtype": "float16",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 1911.5641467278792,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0011234169942326844,
+            "seconds_relative_mad": 0.015204553864510013,
+            "size": 1024
+          },
+          {
+            "dtype": "float16",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 2586.6479778689054,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.006641749991104007,
+            "seconds_relative_mad": 0.0016276397817311088,
+            "size": 2048
+          },
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "memory_bandwidth",
+            "notes": [
+              "Streaming read only; a read+write copy would report higher"
+            ],
+            "rate": 75.74455741796139,
+            "rate_unit": "GB/s read",
+            "seconds_median": 0.0017719785100780427,
+            "seconds_relative_mad": 0.014189437743638723,
+            "size": 33554432
+          }
+        ],
+        "observed_at": "2026-08-11T22:16:38.188969+00:00",
+        "stack": "python-3.12.9_macos-26.1_mlx-0.32.0_mlx-lm-0.31.3_coremltools-9.0",
+        "warnings": []
+      }
+    },
+    {
+      "run_id": 2,
+      "device": "Apple M2",
+      "stack": "python-3.12.9_macos-26.1_mlx-0.32.0_mlx-lm-0.31.3_coremltools-9.0",
+      "observed_at": "2026-08-11T22:17:09.076903+00:00",
+      "recorded_at": "2026-08-11T22:17:09.534441+00:00",
+      "validated": true,
+      "payload": {
+        "context": {
+          "battery": {
+            "available": true,
+            "charge_mah": 3119.0,
+            "cycle_count": 795.0,
+            "energy_integration_possible": false,
+            "energy_remaining_wh": 40.257,
+            "full_charge_mah": 3600.0,
+            "is_charging": true,
+            "on_ac_power": true,
+            "temperature_c": 30.5,
+            "voltage_v": 12.91
+          },
+          "captured_at": "2026-08-11T22:17:09.065281+00:00",
+          "cpu_percent_at_start": 12.0,
+          "device": "Apple M2",
+          "gpu_percent_at_start": 0.0,
+          "low_power_mode": false,
+          "memory_available_gb": 2.43,
+          "platform": "macOS-26.1",
+          "power_source": "ac",
+          "static": {
+            "cpu_cores": 8,
+            "gpu_cores": 8,
+            "memory_total_gb": 8.0,
+            "storage_total_gb": 228.27
+          },
+          "storage_free_gb": 21.05,
+          "swap_used_gb": 0.72
+        },
+        "device": "Apple M2",
+        "measurements": [
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 334.7336453246414,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0008019374799914658,
+            "seconds_relative_mad": 0.022608626576075323,
+            "size": 512
+          },
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 1312.8434353383648,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0016357499989680946,
+            "seconds_relative_mad": 0.04735796587008078,
+            "size": 1024
+          },
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 2242.1137376222114,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.007662354008061811,
+            "seconds_relative_mad": 0.004309153889132648,
+            "size": 2048
+          },
+          {
+            "dtype": "float16",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 654.9538150749172,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0004098540230188519,
+            "seconds_relative_mad": 0.04348454741307228,
+            "size": 512
+          },
+          {
+            "dtype": "float16",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 1855.0779162097992,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0011576245015021414,
+            "seconds_relative_mad": 0.01678200170833053,
+            "size": 1024
+          },
+          {
+            "dtype": "float16",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 2583.1961819516428,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.006650625029578805,
+            "seconds_relative_mad": 0.0019691118261704844,
+            "size": 2048
+          },
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "memory_bandwidth",
+            "notes": [
+              "Streaming read only; a read+write copy would report higher"
+            ],
+            "rate": 75.68403601320799,
+            "rate_unit": "GB/s read",
+            "seconds_median": 0.0017733954882714897,
+            "seconds_relative_mad": 0.009509764786655201,
+            "size": 33554432
+          }
+        ],
+        "observed_at": "2026-08-11T22:17:09.076903+00:00",
+        "stack": "python-3.12.9_macos-26.1_mlx-0.32.0_mlx-lm-0.31.3_coremltools-9.0",
+        "warnings": []
+      }
+    },
+    {
+      "run_id": 3,
+      "device": "Apple M2",
+      "stack": "python-3.12.9_macos-26.1_mlx-0.32.0_mlx-lm-0.31.3_coremltools-9.0",
+      "observed_at": "2026-08-11T22:17:39.920798+00:00",
+      "recorded_at": "2026-08-11T22:17:40.382551+00:00",
+      "validated": true,
+      "payload": {
+        "context": {
+          "battery": {
+            "available": true,
+            "charge_mah": 3133.0,
+            "cycle_count": 795.0,
+            "energy_integration_possible": false,
+            "energy_remaining_wh": 40.485,
+            "full_charge_mah": 3600.0,
+            "is_charging": true,
+            "on_ac_power": true,
+            "temperature_c": 30.5,
+            "voltage_v": 12.92
+          },
+          "captured_at": "2026-08-11T22:17:39.909338+00:00",
+          "cpu_percent_at_start": 13.3,
+          "device": "Apple M2",
+          "gpu_percent_at_start": 0.0,
+          "low_power_mode": false,
+          "memory_available_gb": 2.4,
+          "platform": "macOS-26.1",
+          "power_source": "ac",
+          "static": {
+            "cpu_cores": 8,
+            "gpu_cores": 8,
+            "memory_total_gb": 8.0,
+            "storage_total_gb": 228.27
+          },
+          "storage_free_gb": 21.04,
+          "swap_used_gb": 0.72
+        },
+        "device": "Apple M2",
+        "measurements": [
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 348.75901878359196,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0007696874963585287,
+            "seconds_relative_mad": 0.08977035903865578,
+            "size": 512
+          },
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 1116.240448179121,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0019238539971411228,
+            "seconds_relative_mad": 0.26856825335022005,
+            "size": 1024
+          },
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 2243.327568914865,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.007658208021894097,
+            "seconds_relative_mad": 0.0055657923773475984,
+            "size": 2048
+          },
+          {
+            "dtype": "float16",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 669.310762308967,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0004010625125374645,
+            "seconds_relative_mad": 0.03481157038731015,
+            "size": 512
+          },
+          {
+            "dtype": "float16",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 1836.0783475672322,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.0011696034925989807,
+            "seconds_relative_mad": 0.019384273562249935,
+            "size": 1024
+          },
+          {
+            "dtype": "float16",
+            "iterations": 10,
+            "name": "gemm",
+            "notes": [
+              "3 warm-up iterations discarded"
+            ],
+            "rate": 2578.704822129266,
+            "rate_unit": "GFLOP/s",
+            "seconds_median": 0.006662208499619737,
+            "seconds_relative_mad": 0.002489772365149239,
+            "size": 2048
+          },
+          {
+            "dtype": "float32",
+            "iterations": 10,
+            "name": "memory_bandwidth",
+            "notes": [
+              "Streaming read only; a read+write copy would report higher"
+            ],
+            "rate": 75.49510436783136,
+            "rate_unit": "GB/s read",
+            "seconds_median": 0.001777833531377837,
+            "seconds_relative_mad": 0.009555633849680029,
+            "size": 33554432
+          }
+        ],
+        "observed_at": "2026-08-11T22:17:39.920798+00:00",
+        "stack": "python-3.12.9_macos-26.1_mlx-0.32.0_mlx-lm-0.31.3_coremltools-9.0",
+        "warnings": []
+      }
+    }
+  ]
+}

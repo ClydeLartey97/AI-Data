@@ -104,8 +104,8 @@ work.
 An Apple M2 was measured across three preflight-validated runs: **2,583
 GFLOP/s** dense fp16 GEMM and **75.7 GB/s** streaming read, 0.3% spread. That
 is 89.7% of its published arithmetic peak and 75.7% of its published bus.
-The three raw runs are held in the local baseline store, which is not
-committed; the medians are recorded in `hardware/derive.py`. These are
+The three raw runs are in `benchmarks/data/m2_baseline_runs.json`; the
+medians are recorded in `hardware/derive.py`. These are
 throughput ceilings, not workload profiles: the measured-workload store is
 still empty.
 
