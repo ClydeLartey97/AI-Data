@@ -107,57 +107,6 @@ batch sizes of 63, 81, 54 and 37 — four vendors, one equation.
 
 ---
 
-## Modelling a datacentre you cannot visit
-
-This is a standalone model in `hardware/apple_rack.py`, covered by its own
-tests. It is not part of the app: the rack layout it models is reported, not
-published by Apple, so it is kept out of the product.
-
-Apple's AI servers are reported to be built from Apple silicon: rack chassis
-of small, individually removable compute boards, each with one SoC and its own
-memory.
-**That is the same silicon anyone can buy and measure.**
-
-So a fleet built from a part you can hold is a fleet you can characterise
-without physical access to it. Measure one chip, apply the published core and
-bus ratios, apply a stated scaling law, and you get a defensible estimate of
-what a rack does per kilowatt — no site visit, no vendor briefing. That
-position exists *only* because the retail part and the server part are the
-same design, which is not true for anyone shipping discrete GPUs.
-
-Three rules keep it honest, and each is enforced in code rather than noted in
-a comment:
-
-**Boards do not share memory.** This is the property most likely to be got
-wrong by analogy with GPU racks. Eight H200s on NVLink present as one pool;
-thirty-two Apple boards on a backplane do not. A 70B model at 4-bit needs
-42.2 GB and **will not run on a 24 GB board even though the chassis holds
-768 GB in total.** The model refuses rather than aggregating, because
-aggregating would turn a physically impossible deployment into an attractive
-number.
-
-**Throughput replicates for independent requests only.** Inference serving
-needs no gradient synchronisation, so it scales near-linearly — measured
-across 83 multi-accelerator MLPerf curves. Splitting one model across boards
-is refused outright, because the backplane is unmeasured.
-
-**Geometry is declared, never assumed.** Published board counts are recorded
-with their source attached, and what was *not* published is stated as not
-published rather than guessed.
-
-Scaling across Apple's own generations is separated into two tiers with
-different licences. `DERIVED` scales a measured per-core rate to a sibling
-built from the same core. `PROJECTED` crosses a generation boundary, where
-that licence does not exist — so no rate travels, only the *achieved fraction*
-of published peak, which is a property of the toolchain rather than the core.
-A projection can never outrank a measurement.
-
-Multi-die packages pay per crossing, compounding: a two-die part scales at
-0.90, a quad-die at 0.81. A flat two-die derate applied to a quad-die package
-overstates it by 11%.
-
----
-
 ## The product
 
 Six local pages, one per task, plus a versioned JSON API:
@@ -214,7 +163,7 @@ adapters/   five market boundaries, weather, and per-plant availability
 core/       market-agnostic: exact planning, energy dispatch, audit, backtest
 hardware/   catalogue, measurement, roofline prediction, cross-part scaling
 app/        six operator pages, charts, JSON API, loopback server
-tests/      592 offline algorithm, page, persistence and HTTP contract tests
+tests/      521 offline algorithm, page, persistence and HTTP contract tests
 ```
 
 Deeper documentation lives in [`docs/`](docs/): the exact planner equations and
